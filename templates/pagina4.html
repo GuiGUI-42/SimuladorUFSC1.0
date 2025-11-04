@@ -13,6 +13,12 @@
     <style>
     .font-courier { font-family: 'Courier New', Courier, monospace; }
     .font-montserrat { font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+    .info-icon {
+        display:inline-flex; align-items:center; justify-content:center;
+        width:18px; height:18px; line-height:18px; margin-left:6px;
+        border-radius:50%; background:#1976d2; color:#fff; font-weight:700;
+        cursor:pointer; font-size:12px;
+    }
     .right-section {
         overflow: visible !important;
         border: 2px solid #ffffff;
@@ -51,6 +57,9 @@
         box-shadow: 0 2px 6px rgba(33,150,243,0.08) !important;
         font-size: 1.1em !important;
     }
+     #modal-pz-ft > div {
+    zoom: 1.5;
+    }
     .menu-link:hover {
         background: linear-gradient(90deg, #4caf50 0%, #2196f3 100%) !important;
         color: #fff !important;
@@ -80,6 +89,7 @@
         width: 55px !important; min-width: 0;
         font-size: 0.95em;  background: #ffffff;
     }
+    .seta-grafico-btn { background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px; }
     </style>
 </head>
 <body style="margin:0; background:#f3f3f7;">
@@ -135,6 +145,11 @@
                             <div id="planta-zeros-list"></div>
                             <button type="button" class="add-btn" id="add-planta-zero-btn">Adicionar Zero</button>
                         </div>
+                        
+                    </div>
+                    <div style="margin-bottom: 2px;">
+                            <span>Ganho(K):</span>
+                            <input id="ganho-planta" type="number" min="0" step="0.01" value="1" style="width: auto; margin-left: 8px;">
                     </div>
                     <div style="margin-top: 16px;">
                         <b>Função de Transferência da Planta:</b>
@@ -184,6 +199,30 @@
                     <div id="ft-controlador-parcial" class="latex-container" style="margin-top: 8px; display: none; word-break: break-word; max-width: 100%;"></div>
                 </div>
             </div>
+
+            <!-- NOVO: Filtro F(s), igual à página de alocação -->
+            <div style="margin-top: 5px;">
+                <h3 style="margin-top:0;">Filtro F(s)</h3>
+                <div style="margin-bottom:10px;">
+                    <label>
+                        <input id="filtro-ativo" type="checkbox">
+                        Ativar Filtro F(s)
+                    </label>
+                </div>
+                <div id="filtro-config" style="display:none;">
+                    <div class="param-title" style="font-size:1em;font-weight:normal;margin-bottom:2px;">Polos do Filtro</div>
+                    <div id="filtro-polos-list"></div>
+                    <button type="button" class="add-btn" id="add-filtro-polo-btn">Adicionar Polo</button>
+
+                    <div style="margin-top: 12px;">
+                        <span>Ganho (Kf):</span>
+                        <input id="ganho-filtro" type="number" min="0" step="0.01" value="1" style="width: 80px; margin-left: 8px;">
+                    </div>
+                    <!-- opcional: LaTeX do filtro
+                    <div style="margin-top:8px;"><span id="latex-filtro" class="latex-container"></span></div>
+                    -->
+                </div>
+            </div>
         </div>
 
         <!-- Direita -->
@@ -196,14 +235,14 @@
 
             <!-- Resposta ao Degrau -->
             <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                <button id="seta-grafico-closed" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25BC;</button>
+                <button id="seta-grafico-closed" class="seta-grafico-btn">&#x25BC;</button>
                 <h4 style="margin: 0 8px 0 0;">Resposta ao Degrau </h4>
             </div>
             <div id="container-plot-closed" style="margin-bottom: 16px;">
                 <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 8px;">
                     <span style="font-weight: bold; color: #1976d2;">Parâmetros da Perturbação:</span>
                     <label for="input-t-fechada-grafico">Tempo:</label>
-                    <input id="input-t-fechada-grafico" type="number" min="0" max="50" step="0.1" value="20" style="width: 60px;">
+                    <input id="input-t-fechada-grafico" type="number" min="0" max="50" step="0.1" value="10" style="width: 60px;">
                     <label for="input-a-fechada-grafico">Amplitude:</label>
                     <input id="input-a-fechada-grafico" type="number" min="-5" max="5" step="0.01" value="0" style="width: 60px;">
                     <input type="range" id="slider-a-fechada-grafico" min="-5" max="5" step="0.01" value="0" style="width: 180px;">
@@ -221,35 +260,42 @@
 
             <!-- PZ -->
             <div style="display: flex; align-items: center; margin-bottom: 4px; margin-top: 16px;">
-                <button id="seta-grafico-pz-closed" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25BC;</button>
+                <button id="seta-grafico-pz-closed" class="seta-grafico-btn">&#x25BC;</button>
                 <h4 style="margin: 0 8px 0 0;">Diagrama de Polos e Zeros</h4>
                 <select id="tipo-diagrama-pz" style="margin-left: 8px;">
                     <option value="malha_fechada" selected>Malha Fechada</option>
                     <option value="malha_aberta">Malha Aberta</option>
                     <option value="erro">Erro E/R</option>
-                    <option value="perturbacao">Perturbação Y/Q</option>
+                    <option value="perturbacao">Y/Q</option>
                 </select>
+                <button id="btn-pz-ft" class="info-icon" title="Mostrar FT da seleção" style="margin-left:8px;">i</button>
             </div>
-            <div id="container-plot-pz-closed" style="margin-bottom: 16px; display:none;">
+            <div id="container-plot-pz-closed" style="margin-bottom: 16px;display: none;">
                 <div id="plot_pz_closed"></div>
             </div>
-
+                <div id="modal-pz-ft" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1000;">
+                <div style="background:#fff; max-width:540px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 24px 28px; position:relative;">
+                        <span id="fechar-modal-pz-ft" style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;">&times;</span>
+                        <div style="font-size:1.1em; margin-bottom:12px;"><b>Função de Transferência Selecionada</b></div>
+                        <div id="pz-ft-latex" class="latex-container"></div>
+                    </div>
+                </div>
             <!-- Bode -->
             <div style="display: flex; align-items: center; margin-bottom: 4px; margin-top: 16px;">
-                <button id="seta-grafico-bode" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25BC;</button>
+                <button id="seta-grafico-bode" class="seta-grafico-btn">&#x25BC;</button>
                 <h4 style="margin: 0 8px 0 0;">Diagrama de Bode</h4>
             </div>
-            <div id="container-plot-bode" style="margin-bottom: 16px; display:none;">
+            <div id="container-plot-bode" style="margin-bottom: 16px;display: none;">
                 <div id="plot_bode"></div>
             </div>
 
             <!-- Nyquist -->
             <div style="display: flex; align-items: center; margin-bottom: 4px; margin-top: 16px;">
-                <button id="seta-grafico-nyquist" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25BC;</button>
-                <h4 style="margin: 0 8px 0 0;">Diagrama de Nyquist</h4>
+                <button id="seta-grafico-nyquist" class="seta-grafico-btn">&#x25BC;</button>
+                <h4 style="margin: 0 8px 0 0;">Diagrama de Nyquist </h4>
             </div>
-            <div id="nyquist-img-container" style="display:none;">
-                <img id="nyquist-img" src="" alt="Diagrama de Nyquist" style="max-width:100%;border:1px solid #ccc;">
+            <div id="nyquist-img-container" style="margin-bottom: 16px;display: none;">
+                <img id="nyquist-img" alt="Nyquist" style="max-width:100%; border:1px solid #eee;"/>
             </div>
         </div>
     </div>
@@ -270,9 +316,12 @@
     let polosControlador = [{ real: -1, imag: 0, useImag: false }];
     let zerosControlador = [];
 
+    // NOVO: Filtro
+    let filtroAtivo = false;
+    let polosFiltro = [];   // lista de reais
+    let ganhoFiltro = 1.0;
+
     // Converte itens para o backend respeitando "useImag"
-    // - useImag=false => envia somente o real (im=0)
-    // - useImag=true  => envia par conjugado [re, +im] e [re, -im] quando |im|>0
     function convertToBackend(arr) {
         const out = [];
         for (const p of arr) {
@@ -346,7 +395,7 @@
                     imagInput.style.display = 'inline-block';
                 } else {
                     imagInput.style.display = 'none';
-                    polosPlanta[idx].imag = 0; // SEMPRE zero quando desmarcado
+                    polosPlanta[idx].imag = 0;
                 }
                 atualizarTudoDebounced();
             };
@@ -434,7 +483,7 @@
                     imagInput.style.display = 'inline-block';
                 } else {
                     imagInput.style.display = 'none';
-                    polosControlador[idx].imag = 0; // SEMPRE zero quando desmarcado
+                    polosControlador[idx].imag = 0;
                 }
                 atualizarTudoDebounced();
             };
@@ -499,6 +548,7 @@
         document.getElementById('ganho-controlador').oninput = atualizarTudo;
         document.getElementById('input-t-fechada-grafico').oninput = atualizarTudo;
 
+        // Amplitude perturbação (slider + input)
         const inputAmp = document.getElementById('input-a-fechada-grafico');
         const sliderAmp = document.getElementById('slider-a-fechada-grafico');
         inputAmp.oninput = function() { sliderAmp.value = this.value; atualizarTudoDebounced(); };
@@ -510,9 +560,63 @@
         const cbErr  = document.getElementById('cb-closed-error');
         const cbQ    = document.getElementById('cb-closed-perturb');
         [cbSem, cbCom, cbOpen, cbErr, cbQ].forEach(el => el && (el.onchange = atualizarTudoDebounced));
+
+        // NOVO: eventos do filtro
+        const chkFiltro = document.getElementById('filtro-ativo');
+        const cfgFiltro = document.getElementById('filtro-config');
+        const inpGanhoF = document.getElementById('ganho-filtro');
+        const btnAddFP  = document.getElementById('add-filtro-polo-btn');
+
+        chkFiltro.onchange = function() {
+            filtroAtivo = !!this.checked;
+            cfgFiltro.style.display = filtroAtivo ? '' : 'none';
+            atualizarTudoDebounced();
+        };
+        inpGanhoF.oninput = function() {
+            ganhoFiltro = parseFloat(this.value) || 1.0;
+            atualizarTudoDebounced();
+        };
+        btnAddFP.onclick = function() {
+            polosFiltro.push(-1);
+            renderFiltroList();
+            atualizarTudoDebounced();
+        };
     }
 
-    // Helpers LaTeX — contam corretamente considerando objetos
+    // NOVO: renderização da lista de polos do filtro
+    function renderFiltroList() {
+        const container = document.getElementById('filtro-polos-list');
+        if (!container) return;
+        container.innerHTML = '';
+        polosFiltro.forEach((val, idx) => {
+            const row = document.createElement('div');
+            row.className = 'input-row';
+            row.innerHTML = `
+                <input type="range" class="param-slider" id="filtro-polo-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
+                <input type="number" id="filtro-polo-input-${idx}" step="0.01" min="-10" max="10" value="${val}">
+                <button type="button" class="remove-btn" id="remove-filtro-polo-${idx}" title="Remover Polo">&times;</button>
+            `;
+            container.appendChild(row);
+
+            document.getElementById(`filtro-polo-slider-${idx}`).oninput = function() {
+                polosFiltro[idx] = parseFloat(this.value);
+                document.getElementById(`filtro-polo-input-${idx}`).value = this.value;
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`filtro-polo-input-${idx}`).oninput = function() {
+                polosFiltro[idx] = parseFloat(this.value);
+                document.getElementById(`filtro-polo-slider-${idx}`).value = this.value;
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`remove-filtro-polo-${idx}`).onclick = function() {
+                polosFiltro.splice(idx, 1);
+                renderFiltroList();
+                atualizarTudoDebounced();
+            };
+        });
+    }
+
+    // Helpers LaTeX — corrigem s^k quando houver zero/polo em 0
     function countZeroAtZero(arr, tol = 1e-8) {
         if (!Array.isArray(arr)) return 0;
         return arr.filter(v => {
@@ -542,6 +646,8 @@
     }
 
     async function atualizarTudo() {
+
+        
         if (zerosPlanta.length > polosPlanta.length) {
             alert("A planta não pode ter mais zeros do que polos!"); return;
         }
@@ -552,15 +658,21 @@
         const ganhoControlador = parseFloat(document.getElementById('ganho-controlador').value);
         const t_perturb_fechada = parseFloat(document.getElementById('input-t-fechada-grafico').value);
         const amp_perturb_fechada = parseFloat(document.getElementById('input-a-fechada-grafico').value);
-
+        const ganhoPlanta = parseFloat(document.getElementById('ganho-planta').value);
+        
         const data = {
             polos_planta: convertToBackend(polosPlanta),
             zeros_planta: convertToBackend(zerosPlanta),
             polos_controlador: convertToBackend(polosControlador),
             zeros_controlador: convertToBackend(zerosControlador),
             ganho_controlador: ganhoControlador,
+            ganho_planta: ganhoPlanta,
             t_perturb_fechada: t_perturb_fechada,
-            amp_perturb_fechada: amp_perturb_fechada
+            amp_perturb_fechada: amp_perturb_fechada,
+            // NOVO: filtro
+            filtro_ativo: filtroAtivo,
+            polos_filtro: polosFiltro,
+            ganho_filtro: ganhoFiltro
         };
 
         const res = await fetch('/atualizar_pagina4', {
@@ -592,12 +704,25 @@
 
         if (window.MathJax) MathJax.typesetPromise();
 
+        // Monta curvas de resposta
         const tracesClosed = [];
         const base = (json.plot_closed_data && json.plot_closed_data.data) ? json.plot_closed_data.data : [];
-        if (document.getElementById('cb-base-sem')?.checked && base[0]) tracesClosed.push(base[0]);
+
+        // Malha Fechada: se filtro ativo e disponível, usa filtrada; senão usa base
+        if (document.getElementById('cb-base-sem')?.checked) {
+            if (filtroAtivo && json.plot_closed_filt && json.plot_closed_filt.data && json.plot_closed_filt.data[0]) {
+                tracesClosed.push(json.plot_closed_filt.data[0]);
+            } else if (base[0]) {
+                tracesClosed.push(base[0]);
+            }
+        }
+        // Com Perturbação
         if (document.getElementById('cb-base-com')?.checked && base[1]) tracesClosed.push(base[1]);
+        // Malha Aberta (Planta)
         if (document.getElementById('cb-base-open')?.checked && base[2]) tracesClosed.push(base[2]);
+        // E/R
         if (document.getElementById('cb-closed-error')?.checked && json.error_closed_data) tracesClosed.push(json.error_closed_data.data[0]);
+        // Y/Q
         if (document.getElementById('cb-closed-perturb')?.checked && json.perturb_closed_data) tracesClosed.push(json.perturb_closed_data.data[0]);
 
         Plotly.newPlot('plot_closed', tracesClosed, json.plot_closed_data.layout);
@@ -609,10 +734,11 @@
 
     window.onload = function() {
         renderInputs();
+        renderFiltroList(); // NOVO
         setupBtns();
         atualizarTudo();
     };
-
+    document.getElementById('ganho-planta').oninput = atualizarTudo;
     document.getElementById('select-ft-planta').onchange = function() {
         let val = this.value;
         document.getElementById('ft-planta-fatorada').style.display = val === 'fatorada' ? '' : 'none';
@@ -662,26 +788,61 @@
         const json = await res.json();
         document.getElementById('nyquist-img').src = "data:image/png;base64," + json.nyquist_img;
     }
+    let pzLatexSel = "";
 
     async function atualizarPZClosed() {
-        const tipo = document.getElementById('tipo-diagrama-pz').value;
-        const data = {
-            polos_planta: convertToBackend(polosPlanta),
-            zeros_planta: convertToBackend(zerosPlanta),
-            polos_controlador: convertToBackend(polosControlador),
-            zeros_controlador: convertToBackend(zerosControlador),
-            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value),
-            tipo: tipo
-        };
-        const res = await fetch('/atualizar_pz_closed', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        const json = await res.json();
-        Plotly.newPlot('plot_pz_closed', json.plot_pz_closed.data, json.plot_pz_closed.layout);
+    const tipo = document.getElementById('tipo-diagrama-pz').value;
+    const data = {
+        polos_planta: convertToBackend(polosPlanta),
+        zeros_planta: convertToBackend(zerosPlanta),
+        polos_controlador: convertToBackend(polosControlador),
+        zeros_controlador: convertToBackend(zerosControlador),
+        ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value),
+        tipo: tipo,
+        ganho_planta: parseFloat(document.getElementById('ganho-planta').value),
+        filtro_ativo: filtroAtivo,
+        polos_filtro: polosFiltro,
+        ganho_filtro: ganhoFiltro
+    };
+    const res = await fetch('/atualizar_pz_closed', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    const json = await res.json();
+    Plotly.newPlot('plot_pz_closed', json.plot_pz_closed.data, json.plot_pz_closed.layout);
+    // Adicione esta linha para atualizar o conteúdo do modal:
+    if (json.latex_ft_sel) {
+    const tipo = document.getElementById('tipo-diagrama-pz').value;
+    if (tipo === 'perturbacao') {
+        // Y/Q
+        const kZerosYQ = countZeroAtZero(polosControlador) + countZeroAtZero(zerosPlanta);
+        const kPolesYQ = effectiveZeroPoles(polosControlador.concat(polosPlanta));
+        pzLatexSel = fixFracWithS(json.latex_ft_sel, kZerosYQ, kPolesYQ, 's');
+    } else if (tipo === 'malha_aberta') {
+        // Malha aberta: zeros em zero do numerador = countZeroAtZero(zerosPlanta)
+        // polos em zero do denominador = effectiveZeroPoles(polosPlanta)
+        const kZerosOpen = countZeroAtZero(zerosPlanta);
+        const kPolesOpen = effectiveZeroPoles(polosPlanta);
+        pzLatexSel = fixFracWithS(json.latex_ft_sel, kZerosOpen, kPolesOpen, 's');
+    } else {
+        pzLatexSel = json.latex_ft_sel;
     }
+}
+}
     document.getElementById('tipo-diagrama-pz').onchange = atualizarPZClosed;
-
+    document.getElementById('btn-pz-ft').onclick = function () {
+        document.getElementById('pz-ft-latex').innerHTML = pzLatexSel || "";
+        if (window.MathJax) MathJax.typesetPromise();
+        document.getElementById('modal-pz-ft').style.display = 'block';
+    };
+    document.getElementById('fechar-modal-pz-ft').onclick = function () {
+        document.getElementById('modal-pz-ft').style.display = 'none';
+    };
+    window.addEventListener('click', function (e) {
+        const m = document.getElementById('modal-pz-ft');
+        if (e.target === m) m.style.display = 'none';
+    });
+    
     async function atualizarBode() {
         const data = {
             polos_planta: convertToBackend(polosPlanta),

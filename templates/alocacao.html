@@ -66,7 +66,9 @@
         body.dark-mode .menu-content { background:#1e1e1e; }
         body.dark-mode .menu-icon { background:#2196f3 !important; }
         body.dark-mode .section-title { color:#fff !important; }
-
+        #modal-ft-selecao > div {
+        zoom: 1.5;
+        }
         /* Tamanho do MathJax */
         #latex-controlador mjx-container { font-size: 160% !important; line-height: 1.2; }
         #latex-planta mjx-container { font-size: 160% !important; line-height: 1.2; }
@@ -267,12 +269,15 @@
                 <div class="grafico-col" style="flex: 1 1 0;">
                     <label style="font-weight:bold;">Resposta ao Degrau:</label>
                     <div class="box" style="margin-top:8px;">
-                        <select id="tipo-resposta" style="margin-left:0; width:140px;" onchange="updateAll()">
-                            <option value="aberta">Malha Aberta</option>
-                            <option value="fechada">Malha Fechada</option>
-                            <option value="erro">Erro E/R</option>
-                            <option value="perturbacao">Y/Q</option>
-                        </select>
+                        <div class="row-flex">
+                            <select id="tipo-resposta" style="margin-left:0; width:140px;" onchange="updateAll()">
+                                <option value="aberta">Malha Aberta</option>
+                                <option value="fechada">Malha Fechada</option>
+                                <option value="erro">E/R</option>
+                                <option value="perturbacao">Y/Q</option>
+                            </select>
+                            <button id="btn-ft-selecao" class="info-icon" title="Mostrar FT da seleção" style="width:22px;height:22px;line-height:20px;" onclick="abrirModalFtSelecao()">i</button>
+                        </div>
                         <div id="plot-resposta" style="width:100%; height:320px;"></div>
                     </div>
                 </div>
@@ -343,6 +348,15 @@
         </div>
     </div>
 
+    <!-- Modal FT da seleção -->
+    <div id="modal-ft-selecao" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1001;">
+        <div style="background:#fff; max-width:540px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 24px 28px; position:relative;">
+            <span style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;" onclick="fecharModalFtSelecao()">&times;</span>
+            <div style="font-size:1.1em; margin-bottom:12px;"><b>Função de Transferência Selecionada</b></div>
+            <div id="ft-selecao-text" class="latex"></div>
+        </div>
+    </div>
+
     <script>
         // Estado — polos com parte imaginária opcional
         let polos_planta = [{ real: -0.01, imag: 0, useImag: false }];
@@ -354,6 +368,8 @@
         let filtro_ativo = false;
         let polos_filtro = [];
         let ganho_filtro = 1.0;
+        // Mapa de LaTeX enviado pelo backend para o modal
+        const latex_modal_map = { aberta: "", fechada: "", erro: "", perturbacao: "" };
 
         // Converte para backend: objetos -> números ou pares conjugados [re, im]
         function convertToBackend(arr) {
@@ -634,6 +650,26 @@
 
                     // PZ via endpoint dedicado
                     updatePZ(tipoPZ);
+
+                    // LaTeX das FTs para o modal
+                    if (data.latex_resp_aberta !== undefined) {
+                        const kZerosOpen = countZeroAtZero(zeros_planta);
+                        const kPolesOpen = effectiveZeroPoles(polos_planta);
+                        latex_modal_map.aberta = ensureWrappedLatex(fixFracWithS(data.latex_resp_aberta, kZerosOpen, kPolesOpen, 's'));
+                    } else {
+                        latex_modal_map.aberta = "";
+                    }
+                    latex_modal_map.fechada      = data.latex_resp_fechada || "";
+                    latex_modal_map.erro         = data.latex_resp_erro || "";
+                    if (data.latex_resp_perturbacao !== undefined) {
+                        // Zeros em zero do numerador: polos_controlador + zeros_planta
+                        const kZerosYQ = countZeroAtZero(polos_controlador) + countZeroAtZero(zeros_planta);
+                        // Polos em zero do denominador: polos_controlador + polos_planta
+                        const kPolesYQ = effectiveZeroPoles(polos_controlador.concat(polos_planta));
+                        latex_modal_map.perturbacao = ensureWrappedLatex(fixFracWithS(data.latex_resp_perturbacao, kZerosYQ, kPolesYQ, 's'));
+                    } else {
+                        latex_modal_map.perturbacao = "";
+                    }
                 })
                 .catch(err => console.error('Erro ao atualizar (alocacao_polos_backend):', err));
             } catch(e) {
@@ -651,7 +687,10 @@
                     zeros_planta: convertToBackend(zeros_planta),
                     polos_controlador: convertToBackend(polos_controlador),
                     zeros_controlador: convertToBackend(zeros_controlador),
-                    ganho_controlador, ganho_planta, tipo: tipoPZ
+                    ganho_controlador, ganho_planta, tipo: tipoPZ,
+                    filtro_ativo,
+                    polos_filtro,
+                    ganho_filtro
                 })
             })
             .then(r => r.json())
@@ -714,6 +753,22 @@
         function fecharModalTs(){ const m=document.getElementById('modal-ts'); if(m) m.style.display='none'; }
         function abrirModalPd(){ const m=document.getElementById('modal-pd'); if(m) m.style.display='block'; }
         function fecharModalPd(){ const m=document.getElementById('modal-pd'); if(m) m.style.display='none'; }
+        function abrirModalFtSelecao(){
+            const tipo = document.getElementById('tipo-resposta')?.value || 'fechada';
+            const padrao = {
+                aberta: "\\( G(s) \\)",
+                fechada: "\\( \\frac{Y(s)}{R(s)} = \\frac{G_c(s)\\,G(s)}{1 + G_c(s)\\,G(s)} \\)",
+                erro: "\\( \\frac{E(s)}{R(s)} = \\frac{1}{1 + G_c(s)\\,G(s)} \\)",
+                perturbacao: "\\( \\frac{Y(s)}{Q(s)} = \\frac{G(s)}{1 + G_c(s)\\,G(s)} \\)"
+            };
+            const tex = latex_modal_map[tipo] || padrao[tipo];
+            const el = document.getElementById('ft-selecao-text');
+            el.innerHTML = ensureWrappedLatex(tex);
+            typesetSafe();
+            const m = document.getElementById('modal-ft-selecao');
+            if (m) m.style.display = 'block';
+        }
+        function fecharModalFtSelecao(){ const m=document.getElementById('modal-ft-selecao'); if(m) m.style.display='none'; }
 
         document.addEventListener('DOMContentLoaded', function () {
             // Menu hover
@@ -737,15 +792,17 @@
 
             // Ícone TS abre modal
             document.getElementById('ts-modal-trigger').onclick = function() { abrirModalTs(); };
+            // (opcional) se preferir listener em vez de onclick inline:
+            // document.getElementById('btn-ft-selecao')?.addEventListener('click', abrirModalFtSelecao);
 
             // Clique fora fecha modais
-            ['modal-pmf','modal-ts','modal-pd'].forEach(id=>{
+            ['modal-pmf','modal-ts','modal-pd', 'modal-ft-selecao'].forEach(id=>{
                 const m=document.getElementById(id);
                 if(m){ m.addEventListener('click', (e)=>{ if(e.target===m) m.style.display='none'; }); }
             });
             // Tecla ESC fecha modais
             document.addEventListener('keydown', (e)=>{
-                if(e.key==='Escape'){ ['modal-pmf','modal-ts','modal-pd'].forEach(id=>{ const m=document.getElementById(id); if(m) m.style.display='none'; }); }
+                if(e.key==='Escape'){ ['modal-pmf','modal-ts','modal-pd', 'modal-ft-selecao'].forEach(id=>{ const m=document.getElementById(id); if(m) m.style.display='none'; }); }
             });
 
             // Feedback (se existir na página principal)
