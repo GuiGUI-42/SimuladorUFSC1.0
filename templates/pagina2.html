@@ -238,6 +238,13 @@
                         <button type="button" class="add-btn" id="add-zero-btn">Adicionar Zero</button>
                     </div>
                 </div>
+                <div class="param-section" id="ganho-section" style="margin-top:8px;">
+                    <div class="param-title" style="font-size:1em;font-weight:normal;margin-bottom:4px;">Ganho da Planta (K):</div>
+                    <div class="input-row" style="gap:8px;">
+                        <input type="range" class="param-slider" id="ganho-planta-slider" min="-50" max="50" step="0.01" value="1">
+                        <input type="number" class="param-input" id="ganho-planta" min="-50" max="50" step="0.01" value="1">
+                    </div>
+                </div>
                 <div style="margin-top: 16px;">
                     <b>Função de Transferência da Planta:</b>
                     <select id="select-ft-planta" style="margin-left: 8px;">
@@ -288,8 +295,10 @@
 
     <script>
     // --- Estado dos polos e zeros da planta ---
-    let polosPlanta = [-1];
-    let zerosPlanta = [0];
+    // Inicializa planta vazia (sem polos e sem zeros)
+    let polosPlanta = [];
+    let zerosPlanta = [];
+    let ganhoPlanta = 1.0;
 
     // Função debounce
 function debounce(func, wait) {
@@ -332,11 +341,9 @@ function renderPlantaInputs() {
         };
         // Remover
         document.getElementById(`remove-polo-${idx}`).onclick = function() {
-            if (polosPlanta.length > 1) {
-                polosPlanta.splice(idx, 1);
-                renderPlantaInputs();
-                atualizarDebounced();
-            }
+            polosPlanta.splice(idx, 1);
+            renderPlantaInputs();
+            atualizarDebounced();
         };
     });
 
@@ -392,6 +399,15 @@ function setupPlantaBtns() {
     };
 }
 
+// --- Ganho da planta slider/input ---
+function setupGanhoPlanta() {
+    const slider = document.getElementById('ganho-planta-slider');
+    const input = document.getElementById('ganho-planta');
+    if (!slider || !input) return;
+    slider.oninput = function(){ input.value = this.value; ganhoPlanta = parseFloat(this.value)||0; atualizarDebounced(); };
+    input.oninput = function(){ slider.value = this.value; ganhoPlanta = parseFloat(this.value)||0; atualizarDebounced(); };
+}
+
 // --- Atualização dos gráficos e LaTeX ---
 async function atualizar() {
     // Monta arrays atuais dos polos/zeros
@@ -403,10 +419,14 @@ async function atualizar() {
     );
     polosPlanta = polos;
     zerosPlanta = zeros;
+    // atualiza ganho a partir do input (garantia)
+    const gpEl = document.getElementById('ganho-planta');
+    if (gpEl) ganhoPlanta = parseFloat(gpEl.value)||ganhoPlanta;
 
     const data = {
         polos_planta: polosPlanta,
-        zeros_planta: zerosPlanta
+        zeros_planta: zerosPlanta,
+        ganho_planta: ganhoPlanta
     };
     const res = await fetch('/atualizar_pagina2', {
         method: 'POST',
@@ -417,7 +437,7 @@ async function atualizar() {
 
     // Helpers (mesmos que em pagina4)
     function countZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr)) return 0; return arr.filter(p => Math.abs(p) < tol).length; }
-    function effectiveKZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr) || arr.length === 0) return 1; return countZeroPoles(arr, tol); }
+    function effectiveKZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr) || arr.length === 0) return 0; return countZeroPoles(arr, tol); }
     function fixDenWithS(latex, k, varName = 's') { if (!latex || k <= 0) return latex; const sPart = k === 1 ? varName : `${varName}^${k}`; return latex.replace(/\}\{\s*1\s*\}/g, `}{${sPart}}`); }
 
     const kP0 = effectiveKZeroPoles(polosPlanta);
@@ -481,6 +501,7 @@ async function atualizar() {
         // Inicializa inputs e botões
         renderPlantaInputs();
         setupPlantaBtns();
+        setupGanhoPlanta();
         atualizar();
 
         // Menu hamburguer interativo com delay de 0.3s para fechar

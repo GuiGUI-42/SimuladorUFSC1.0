@@ -149,7 +149,8 @@
                     </div>
                     <div style="margin-bottom: 2px;">
                             <span>Ganho(K):</span>
-                            <input id="ganho-planta" type="number" min="0" step="0.01" value="1" style="width: auto; margin-left: 8px;">
+                            <input id="ganho-planta" type="number" min="0" max="50" step="0.01" value="1" style="width: auto; margin-left: 8px;" onchange="document.getElementById('ganho-planta-slider').value=this.value;">
+                            <input id="ganho-planta-slider" type="range" class="param-slider" min="0" max="50" step="0.01" value="1" style="width:200px;" oninput="document.getElementById('ganho-planta').value=this.value;">
                     </div>
                     <div style="margin-top: 16px;">
                         <b>Função de Transferência da Planta:</b>
@@ -185,7 +186,8 @@
                 </div>
                 <div style="margin-bottom: 12px;">
                     <span>Ganho (Kc):</span>
-                    <input id="ganho-controlador" type="number" min="-10" max="20" step="0.01" value="1" style="width: 80px; margin-left: 8px;">
+                    <input id="ganho-controlador" type="number" min="-10" max="20" step="0.01" value="1" style="width: 80px; margin-left: 8px;" onchange="document.getElementById('ganho-controlador-slider').value=this.value;">
+                    <input id="ganho-controlador-slider" type="range" class="param-slider" min="-50" max="50" step="0.01" value="1" style="width:200px;" oninput="document.getElementById('ganho-controlador').value=this.value;">
                 </div>
                 <div style="margin-top: 16px;">
                     <b>Função de Transferência do Controlador:</b>
@@ -311,9 +313,9 @@
 
     <script>
     // Estado padronizado: polos como objetos {real, imag, useImag}
-    let polosPlanta = [{ real: -1, imag: 0, useImag: false }];
+    let polosPlanta = [];
     let zerosPlanta = [];
-    let polosControlador = [{ real: -1, imag: 0, useImag: false }];
+    let polosControlador = [];
     let zerosControlador = [];
 
     // NOVO: Filtro
@@ -404,11 +406,9 @@
                 atualizarTudoDebounced();
             };
             document.getElementById(`remove-planta-polo-${idx}`).onclick = function() {
-                if (polosPlanta.length > 1) {
-                    polosPlanta.splice(idx, 1);
-                    renderInputs();
-                    atualizarTudoDebounced();
-                }
+                polosPlanta.splice(idx, 1);
+                renderInputs();
+                atualizarTudoDebounced();
             };
         });
 
@@ -492,11 +492,9 @@
                 atualizarTudoDebounced();
             };
             document.getElementById(`remove-controlador-polo-${idx}`).onclick = function() {
-                if (polosControlador.length > 1) {
-                    polosControlador.splice(idx, 1);
-                    renderInputs();
-                    atualizarTudoDebounced();
-                }
+                polosControlador.splice(idx, 1);
+                renderInputs();
+                atualizarTudoDebounced();
             };
         });
 
@@ -545,7 +543,13 @@
         document.getElementById('add-controlador-zero-btn').onclick = function() {
             zerosControlador.push(0); renderInputs(); atualizarTudo();
         };
-        document.getElementById('ganho-controlador').oninput = atualizarTudo;
+        // Slider e input do ganho do controlador sincronizados
+        const inputGanhoCtrl = document.getElementById('ganho-controlador');
+        const sliderGanhoCtrl = document.getElementById('ganho-controlador-slider');
+        if (inputGanhoCtrl && sliderGanhoCtrl) {
+            inputGanhoCtrl.oninput = function(){ sliderGanhoCtrl.value = this.value; atualizarTudoDebounced(); };
+            sliderGanhoCtrl.oninput = function(){ inputGanhoCtrl.value = this.value; atualizarTudoDebounced(); };
+        }
         document.getElementById('input-t-fechada-grafico').oninput = atualizarTudo;
 
         // Amplitude perturbação (slider + input)
@@ -629,7 +633,8 @@
         }).length;
     }
     function effectiveZeroPoles(arr, tol = 1e-8) {
-        if (!Array.isArray(arr) || arr.length === 0) return 1;
+        // Se não há polos, não deve aparecer fator s no denominador
+        if (!Array.isArray(arr) || arr.length === 0) return 0;
         return countZeroAtZero(arr, tol);
     }
     function fixFracWithS(latex, kZeros, kPoles, varName = 's') {
@@ -646,90 +651,96 @@
     }
 
     async function atualizarTudo() {
-
-        
-        if (zerosPlanta.length > polosPlanta.length) {
-            alert("A planta não pode ter mais zeros do que polos!"); return;
-        }
-        if (zerosControlador.length > polosControlador.length) {
-            alert("O controlador não pode ter mais zeros do que polos!"); return;
-        }
-
-        const ganhoControlador = parseFloat(document.getElementById('ganho-controlador').value);
-        const t_perturb_fechada = parseFloat(document.getElementById('input-t-fechada-grafico').value);
-        const amp_perturb_fechada = parseFloat(document.getElementById('input-a-fechada-grafico').value);
-        const ganhoPlanta = parseFloat(document.getElementById('ganho-planta').value);
-        
-        const data = {
-            polos_planta: convertToBackend(polosPlanta),
-            zeros_planta: convertToBackend(zerosPlanta),
-            polos_controlador: convertToBackend(polosControlador),
-            zeros_controlador: convertToBackend(zerosControlador),
-            ganho_controlador: ganhoControlador,
-            ganho_planta: ganhoPlanta,
-            t_perturb_fechada: t_perturb_fechada,
-            amp_perturb_fechada: amp_perturb_fechada,
-            // NOVO: filtro
-            filtro_ativo: filtroAtivo,
-            polos_filtro: polosFiltro,
-            ganho_filtro: ganhoFiltro
-        };
-
-        const res = await fetch('/atualizar_pagina4', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        const json = await res.json();
-
-        const kZerosPlanta = countZeroAtZero(zerosPlanta);
-        const kPolosPlanta = effectiveZeroPoles(polosPlanta);
-        const kZerosCtrl   = countZeroAtZero(zerosControlador);
-        const kPolosCtrl   = effectiveZeroPoles(polosControlador);
-
-        const lp_polin = fixFracWithS(json.latex_planta_polinomial, kZerosPlanta, kPolosPlanta, 's');
-        const lp_fator = fixFracWithS(json.latex_planta_fatorada,   kZerosPlanta, kPolosPlanta, 's');
-        const lp_parc  = fixFracWithS(json.latex_planta_parcial,    kZerosPlanta, kPolosPlanta, 's');
-
-        const lc_polin = fixFracWithS(json.latex_controlador_polinomial, kZerosCtrl, kPolosCtrl, 's');
-        const lc_fator = fixFracWithS(json.latex_controlador_fatorada,   kZerosCtrl, kPolosCtrl, 's');
-        const lc_parc  = fixFracWithS(json.latex_controlador_parcial,    kZerosCtrl, kPolosCtrl, 's');
-
-        document.getElementById("ft-planta-polinomial").innerHTML = lp_polin || "Erro ao carregar forma polinomial";
-        document.getElementById("ft-planta-fatorada").innerHTML   = lp_fator || "Erro ao carregar forma fatorada";
-        document.getElementById("ft-planta-parcial").innerHTML    = lp_parc  || "Erro ao carregar fração parcial";
-
-        document.getElementById("ft-controlador-polinomial").innerHTML = lc_polin || "Erro ao carregar forma polinomial";
-        document.getElementById("ft-controlador-fatorada").innerHTML   = lc_fator || "Erro ao carregar forma fatorada";
-        document.getElementById("ft-controlador-parcial").innerHTML    = lc_parc  || "Erro ao carregar fração parcial";
-
-        if (window.MathJax) MathJax.typesetPromise();
-
-        // Monta curvas de resposta
-        const tracesClosed = [];
-        const base = (json.plot_closed_data && json.plot_closed_data.data) ? json.plot_closed_data.data : [];
-
-        // Malha Fechada: se filtro ativo e disponível, usa filtrada; senão usa base
-        if (document.getElementById('cb-base-sem')?.checked) {
-            if (filtroAtivo && json.plot_closed_filt && json.plot_closed_filt.data && json.plot_closed_filt.data[0]) {
-                tracesClosed.push(json.plot_closed_filt.data[0]);
-            } else if (base[0]) {
-                tracesClosed.push(base[0]);
+        try {
+            // Não bloquear atualização em casos impróprios; apenas avisar no console
+            if (zerosPlanta.length > polosPlanta.length) {
+                console.warn("Planta com mais zeros do que polos (FT imprópria). Continuando atualização.");
             }
+            if (zerosControlador.length > polosControlador.length) {
+                console.warn("Controlador com mais zeros do que polos (FT imprópria). Continuando atualização.");
+            }
+
+            const ganhoControlador = parseFloat(document.getElementById('ganho-controlador').value);
+            const t_perturb_fechada = parseFloat(document.getElementById('input-t-fechada-grafico').value);
+            const amp_perturb_fechada = parseFloat(document.getElementById('input-a-fechada-grafico').value);
+            const ganhoPlanta = parseFloat(document.getElementById('ganho-planta').value);
+            
+            const data = {
+                polos_planta: convertToBackend(polosPlanta),
+                zeros_planta: convertToBackend(zerosPlanta),
+                polos_controlador: convertToBackend(polosControlador),
+                zeros_controlador: convertToBackend(zerosControlador),
+                ganho_controlador: ganhoControlador,
+                ganho_planta: ganhoPlanta,
+                t_perturb_fechada: t_perturb_fechada,
+                amp_perturb_fechada: amp_perturb_fechada,
+                // NOVO: filtro
+                filtro_ativo: filtroAtivo,
+                polos_filtro: polosFiltro,
+                ganho_filtro: ganhoFiltro
+            };
+
+            const res = await fetch('/atualizar_pagina4', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) throw new Error('Falha ao atualizar (HTTP ' + res.status + ')');
+            const json = await res.json();
+
+            const kZerosPlanta = countZeroAtZero(zerosPlanta);
+            const kPolosPlanta = effectiveZeroPoles(polosPlanta);
+            const kZerosCtrl   = countZeroAtZero(zerosControlador);
+            const kPolosCtrl   = effectiveZeroPoles(polosControlador);
+
+            const lp_polin = fixFracWithS(json.latex_planta_polinomial, kZerosPlanta, kPolosPlanta, 's');
+            const lp_fator = fixFracWithS(json.latex_planta_fatorada,   kZerosPlanta, kPolosPlanta, 's');
+            const lp_parc  = fixFracWithS(json.latex_planta_parcial,    kZerosPlanta, kPolosPlanta, 's');
+
+            const lc_polin = fixFracWithS(json.latex_controlador_polinomial, kZerosCtrl, kPolosCtrl, 's');
+            const lc_fator = fixFracWithS(json.latex_controlador_fatorada,   kZerosCtrl, kPolosCtrl, 's');
+            const lc_parc  = fixFracWithS(json.latex_controlador_parcial,    kZerosCtrl, kPolosCtrl, 's');
+
+            document.getElementById("ft-planta-polinomial").innerHTML = lp_polin || "";
+            document.getElementById("ft-planta-fatorada").innerHTML   = lp_fator || "";
+            document.getElementById("ft-planta-parcial").innerHTML    = lp_parc  || "";
+
+            document.getElementById("ft-controlador-polinomial").innerHTML = lc_polin || "";
+            document.getElementById("ft-controlador-fatorada").innerHTML   = lc_fator || "";
+            document.getElementById("ft-controlador-parcial").innerHTML    = lc_parc  || "";
+
+            if (window.MathJax) MathJax.typesetPromise();
+
+            // Monta curvas de resposta
+            const tracesClosed = [];
+            const base = (json.plot_closed_data && json.plot_closed_data.data) ? json.plot_closed_data.data : [];
+
+            // Malha Fechada: se filtro ativo e disponível, usa filtrada; senão usa base
+            if (document.getElementById('cb-base-sem')?.checked) {
+                if (filtroAtivo && json.plot_closed_filt && json.plot_closed_filt.data && json.plot_closed_filt.data[0]) {
+                    tracesClosed.push(json.plot_closed_filt.data[0]);
+                } else if (base[0]) {
+                    tracesClosed.push(base[0]);
+                }
+            }
+            // Com Perturbação
+            if (document.getElementById('cb-base-com')?.checked && base[1]) tracesClosed.push(base[1]);
+            // Malha Aberta (Planta)
+            if (document.getElementById('cb-base-open')?.checked && base[2]) tracesClosed.push(base[2]);
+            // E/R
+            if (document.getElementById('cb-closed-error')?.checked && json.error_closed_data) tracesClosed.push(json.error_closed_data.data[0]);
+            // Y/Q
+            if (document.getElementById('cb-closed-perturb')?.checked && json.perturb_closed_data) tracesClosed.push(json.perturb_closed_data.data[0]);
+
+            const layoutClosed = (json.plot_closed_data && json.plot_closed_data.layout) ? json.plot_closed_data.layout : {xaxis:{},yaxis:{}};
+            Plotly.newPlot('plot_closed', tracesClosed, layoutClosed);
+
+            // Executa atualizações auxiliares de forma resiliente
+            try { await atualizarPZClosed(); } catch (e) { console.warn('Falha ao atualizar PZ:', e); }
+            try { await atualizarBode(); } catch (e) { console.warn('Falha ao atualizar Bode:', e); }
+            try { await atualizarNyquist(); } catch (e) { console.warn('Falha ao atualizar Nyquist:', e); }
+        } catch (e) {
+            console.error('Erro em atualizarTudo:', e);
         }
-        // Com Perturbação
-        if (document.getElementById('cb-base-com')?.checked && base[1]) tracesClosed.push(base[1]);
-        // Malha Aberta (Planta)
-        if (document.getElementById('cb-base-open')?.checked && base[2]) tracesClosed.push(base[2]);
-        // E/R
-        if (document.getElementById('cb-closed-error')?.checked && json.error_closed_data) tracesClosed.push(json.error_closed_data.data[0]);
-        // Y/Q
-        if (document.getElementById('cb-closed-perturb')?.checked && json.perturb_closed_data) tracesClosed.push(json.perturb_closed_data.data[0]);
-
-        Plotly.newPlot('plot_closed', tracesClosed, json.plot_closed_data.layout);
-
-        await atualizarPZClosed();
-        await atualizarBode();
-        await atualizarNyquist();
     }
 
     window.onload = function() {
@@ -738,7 +749,13 @@
         setupBtns();
         atualizarTudo();
     };
-    document.getElementById('ganho-planta').oninput = atualizarTudo;
+    // Sincronização slider/entrada do ganho da planta
+    const inputGanhoPlanta = document.getElementById('ganho-planta');
+    const sliderGanhoPlanta = document.getElementById('ganho-planta-slider');
+    if (inputGanhoPlanta && sliderGanhoPlanta) {
+        inputGanhoPlanta.oninput = function(){ sliderGanhoPlanta.value = this.value; atualizarTudoDebounced(); };
+        sliderGanhoPlanta.oninput = function(){ inputGanhoPlanta.value = this.value; atualizarTudoDebounced(); };
+    }
     document.getElementById('select-ft-planta').onchange = function() {
         let val = this.value;
         document.getElementById('ft-planta-fatorada').style.display = val === 'fatorada' ? '' : 'none';

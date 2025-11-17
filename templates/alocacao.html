@@ -135,7 +135,10 @@
 
             <div class="param-list">
                 <label>Ganho da Planta (K<sub>g</sub>):</label>
-                <input type="number" id="ganho-planta" class="input-inline" value="1.0" step="0.01" onchange="onGanhoPlantaChange(this.value)">
+                    <div class="param-row">
+                        <input type="range" id="ganho-planta-slider" class="param-slider" min="-50" max="50" step="0.01" value="1.0" oninput="document.getElementById('ganho-planta').value=this.value; onGanhoPlantaChange(this.value)">
+                        <input type="number" id="ganho-planta" class="input-inline" value="1.0" step="0.01" min="-50" max="50" onchange="document.getElementById('ganho-planta-slider').value=this.value; onGanhoPlantaChange(this.value)">
+                    </div>
             </div>
 
             <button class="add-btn" onclick="generateRandomFT()">Gerar FT Aleatória</button>
@@ -166,7 +169,10 @@
 
             <div class="param-list">
                 <label>Ganho do Controlador (K<sub>c</sub>):</label>
-                <input type="number" id="ganho-controlador" class="input-inline" value="1.0" step="0.01" onchange="onGanhoControladorChange(this.value)">
+                <div class="param-row">
+                    <input type="range" id="ganho-controlador-slider" class="param-slider" min="-50" max="50" step="0.01" value="1.0" oninput="document.getElementById('ganho-controlador').value=this.value; onGanhoControladorChange(this.value)">
+                    <input type="number" id="ganho-controlador" class="input-inline" value="1.0" step="0.01" onchange="document.getElementById('ganho-controlador-slider').value=this.value; onGanhoControladorChange(this.value)">
+                </div>
             </div>
 
             <div><span class="latex" id="latex-controlador"></span></div>
@@ -359,7 +365,7 @@
 
     <script>
         // Estado — polos com parte imaginária opcional
-        let polos_planta = [{ real: -0.01, imag: 0, useImag: false }];
+        let polos_planta = [];
         let zeros_planta = [];
         let polos_controlador = [];
         let zeros_controlador = [];
@@ -529,7 +535,10 @@
             renderPolosList('controlador-polos-list', polos_controlador, 'controlador-polos');
             renderParamList('controlador-zeros-list', zeros_controlador, 'controlador-zeros');
             document.getElementById('ganho-controlador').value = ganho_controlador;
-            document.getElementById('ganho-planta').value = ganho_planta;
+            const sliderGc = document.getElementById('ganho-controlador-slider');
+            if (sliderGc) sliderGc.value = ganho_controlador;
+                const sliderGp = document.getElementById('ganho-planta-slider');
+                if (sliderGp) sliderGp.value = ganho_planta;
             renderFiltroParamList();
             document.getElementById('ganho-filtro').value = ganho_filtro;
         }
@@ -546,7 +555,11 @@
                 return Math.abs(parseFloat(v) || 0) < tol;
             }).length;
         }
-        function effectiveZeroPoles(arr, tol=1e-8){ if(!Array.isArray(arr)||arr.length===0) return 1; return countZeroAtZero(arr,tol); }
+        function effectiveZeroPoles(arr, tol=1e-8){
+            // Sem polos -> nenhuma potência de s no denominador
+            if(!Array.isArray(arr)||arr.length===0) return 0;
+            return countZeroAtZero(arr,tol);
+        }
         function fixFracWithS(latex,kZeros,kPoles,varName='s'){
             if(!latex) return latex;
             const sZeros=kZeros>1?`${varName}^${kZeros}`:varName;
@@ -575,8 +588,13 @@
         // Atualiza tudo
         function updateAll() {
             try {
-                if (zeros_planta.length > polos_planta.length) { alert("A função de transferência da planta está não própria!"); return; }
-                if (zeros_controlador.length > polos_controlador.length) { alert("A função de transferência do controlador está não própria!"); return; }
+                // Não bloquear: apenas avisar sobre FT não própria e continuar
+                if (zeros_planta.length > polos_planta.length) {
+                    console.warn("Planta com mais zeros que polos (FT imprópria). Continuando atualização.");
+                }
+                if (zeros_controlador.length > polos_controlador.length) {
+                    console.warn("Controlador com mais zeros que polos (FT imprópria). Continuando atualização.");
+                }
 
                 const multiplier = parseFloat(document.getElementById('ts-multiplier').value) || 0.5;
                 const tipoResposta = document.getElementById('tipo-resposta')?.value || "aberta";
@@ -848,6 +866,8 @@
         ganho_planta = parseFloat(rnd(0.5, 2.5).toFixed(2));
         const ganhoPlEl = document.getElementById('ganho-planta');
         if (ganhoPlEl) ganhoPlEl.value = ganho_planta;
+            const ganhoPlSlider = document.getElementById('ganho-planta-slider');
+            if (ganhoPlSlider) ganhoPlSlider.value = ganho_planta;
 
         // Zerar controlador para evitar não-própria acidental
         polos_controlador = [];
@@ -855,6 +875,8 @@
         ganho_controlador = 1.0;
         const ganhoCtrlEl = document.getElementById('ganho-controlador');
         if (ganhoCtrlEl) ganhoCtrlEl.value = ganho_controlador;
+        const ganhoCtrlSlider = document.getElementById('ganho-controlador-slider');
+        if (ganhoCtrlSlider) ganhoCtrlSlider.value = ganho_controlador;
 
         // Atualiza UI e gráficos
         updateParamLists();

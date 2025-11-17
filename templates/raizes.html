@@ -277,7 +277,10 @@
             </div>
             <div class="param-list">
                 <label>Ganho (K):</label>
-                <input type="number" id="ganho" class="input-inline" value="1.0" step="0.01" min="-10" onchange="updateAll(); analisarKLR();">
+                <div class="param-row">
+                    <input type="range" id="ganho-slider" class="param-slider" min="-50" max="50" step="0.01" value="1.0" oninput="document.getElementById('ganho').value=this.value; updateAll(); analisarKLR();">
+                    <input type="number" id="ganho" class="input-inline" value="1.0" step="0.01" min="-50" max="50" onchange="document.getElementById('ganho-slider').value=this.value; updateAll(); analisarKLR();">
+                </div>
             </div>
             <div style="margin: 24px 0 24px 0;">
                 <span class="latex" id="latex-planta"></span>
@@ -293,7 +296,10 @@
             </div>
             <div class="param-list">
                 <label>Ganho(\( K_c \)):</label>
-                <input type="number" id="ganho-controlador" class="input-inline" value="1.0" step="0.01" min="-10" onchange="updateAll(); analisarKLR();atualizarControlador();">
+                <div class="param-row">
+                    <input type="range" id="ganho-controlador-slider" class="param-slider" min="-50" max="50" step="0.01" value="1.0" oninput="document.getElementById('ganho-controlador').value=this.value; updateAll(); analisarKLR(); atualizarControlador();">
+                    <input type="number" id="ganho-controlador" class="input-inline" value="1.0" step="0.01" min="-10" onchange="document.getElementById('ganho-controlador-slider').value=this.value; updateAll(); analisarKLR();atualizarControlador();">
+                </div>
             </div>
             <div class="box">
                 <h4>Função de Transferência do Controlador</h4>

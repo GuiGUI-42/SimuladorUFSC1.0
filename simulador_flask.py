@@ -107,34 +107,80 @@ def latex_factored(roots, var='s'):
     return "".join(termos)
 
 def latex_partial_fraction(num, den, var='s'):
+    """Gera LaTeX para a expansão em frações parciais no formato padrão
+    A_i/(s - p_i)^m + (parte polinomial), garantindo os sinais corretos.
+
+    Regras importantes de formatação:
+    - Para polos reais p: usa-se (s - p). Se p < 0, vira (s + |p|).
+    - Para p ≈ 0: usa-se simplesmente s (ou s^m para multiplicidades).
+    - Para polos complexos p = a ± jb: usa-se (s - (a ± jb)).
+    - Resíduos e coeficientes polinomiais podem ser complexos; são formatados como (a ± bj).
+    """
+    def complex_to_latex(c: complex) -> str:
+        c = complex(c)
+        a = float(np.real(c))
+        b = float(np.imag(c))
+        if abs(b) < 1e-10:
+            return f"{a:.4g}"
+        sign = "+" if b >= 0 else "-"
+        return f"({a:.4g} {sign} {abs(b):.4g}j)"
+
     num = np.trim_zeros(num, 'f')
     den = np.trim_zeros(den, 'f')
     if len(num) == 0 or len(den) == 0:
         return "\\[ 0 \\]"
     try:
         r, p, k = scipy.signal.residue(num, den)
+
+        # Agrupa por polo (com tolerância), preservando multiplicidades
         termos = {}
         for ri, pi in zip(r, p):
-            pi = np.round(pi, 4)
-            if pi not in termos:
-                termos[pi] = []
-            termos[pi].append(ri)
+            a = float(np.real(pi))
+            b = float(np.imag(pi))
+            key = complex(np.round(a, 4), np.round(b, 4))
+            termos.setdefault(key, []).append(ri)
+
         latex_termos = []
         for pi, residuos in termos.items():
+            a = float(np.real(pi))
+            b = float(np.imag(pi))
             for i, ri in enumerate(residuos):
-                ri = np.round(ri, 4)
-                if abs(ri) > 1e-8:
-                    expoente = i + 1
-                    sinal = "+" if pi >= 0 else "-"
-                    valor = abs(pi)
-                    if expoente == 1:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{{var} {sinal} {valor:.4g}}}")
+                if abs(ri) <= 1e-8:
+                    continue
+                expoente = i + 1  # i=0 -> primeira ordem, i=1 -> segunda, etc.
+
+                # Base do denominador (s - p)
+                if abs(b) < 1e-12:  # polo real
+                    if abs(a) < 1e-12:
+                        base = f"{var}"
                     else:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{({var} {sinal} {valor:.4g})^{expoente}}}")
+                        sinal = "-" if a >= 0 else "+"
+                        base = f"{var} {sinal} {abs(a):.4g}"
+                else:  # polo complexo
+                    sinal_im = "+" if b >= 0 else "-"
+                    base = f"{var} - ({a:.4g} {sinal_im} {abs(b):.4g}j)"
+
+                ri_str = complex_to_latex(ri)
+                if expoente == 1:
+                    latex_termos.append(f"\\frac{{{ri_str}}}{{{base}}}")
+                else:
+                    latex_termos.append(f"\\frac{{{ri_str}}}{{({base})^{expoente}}}")
+
+        # Parte polinomial (se existir)
         if k is not None and len(k) > 0:
+            deg = len(k) - 1
             for i, ki in enumerate(k):
-                if abs(ki) > 1e-8:
-                    latex_termos.append(f"{ki:.4g}{var}^{len(k)-i-1}" if i < len(k) - 1 else f"{ki:.4g}")
+                if abs(ki) <= 1e-8:
+                    continue
+                ki_str = complex_to_latex(ki)
+                pow_ = deg - i
+                if pow_ > 1:
+                    latex_termos.append(f"{ki_str}{var}^{pow_}")
+                elif pow_ == 1:
+                    latex_termos.append(f"{ki_str}{var}")
+                else:
+                    latex_termos.append(f"{ki_str}")
+
         return "\\[ " + " + ".join(latex_termos) + " \\]" if latex_termos else "\\[ 0 \\]"
     except Exception as e:
         return f"\\[ \\text{{Erro ao calcular frações parciais: {e}}} \\ ]"
@@ -175,7 +221,7 @@ def atualizar():
     amp_perturb = float(data.get("amp_perturb", 0.5))
     u = np.ones_like(T_long)
     u[T_long >= t_perturb] += amp_perturb
-    _, yout_perturb = ctl.forced_response(G, T_long, u)
+    _, yout_perturb = safe_forced_response(G, T_long, u)
 
     return jsonify({
         "latex_planta": latex_planta,
@@ -279,6 +325,71 @@ def parse_polos_zeros(arr):
         else:
             result.append(float(p))
     return result
+
+# Resposta segura: lida com sistemas estáticos, shapes e diferentes retornos do python-control
+def safe_forced_response(sys, T, U):
+    T = np.asarray(T, dtype=float).reshape(-1)
+    U = np.asarray(U, dtype=float).reshape(-1)
+    if U.shape[0] != T.shape[0]:
+        # Ajusta U para mesmo tamanho de T (degrau unitário por padrão)
+        U = np.ones_like(T, dtype=float) * (U[0] if U.size else 1.0)
+
+    # Trata sistema SISO estático (ganho puro) sem estados
+    try:
+        num, den = ctl.tfdata(sys)  # pode retornar listas aninhadas
+        num = np.array(num).squeeze()
+        den = np.array(den).squeeze()
+        # SISO estático: num e den de tamanho 1
+        if num.ndim == 1 and den.ndim == 1 and num.size == 1 and den.size == 1:
+            gain = float(num[0]) / float(den[0])
+            return T, gain * U
+    except Exception:
+        pass
+
+    # Tenta forced_response e normaliza diferentes formatos de retorno
+    try:
+        res = ctl.forced_response(sys, T, U)
+        # Versões antigas retornam tupla (T, y[, x])
+        if isinstance(res, (tuple, list)):
+            if len(res) >= 2:
+                t = np.asarray(res[0]).reshape(-1)
+                y = np.asarray(res[1])
+                y = np.squeeze(y)
+                if y.ndim == 2:
+                    # Seleciona primeiro canal (SISO)
+                    y = y[0, :]
+                if y.shape[0] != t.shape[0] and y.shape[-1] == t.shape[0]:
+                    y = y.T
+                return t, y.reshape(-1)
+        # Versões novas retornam objeto TimeResponseData
+        t = getattr(res, 'time', None)
+        y = getattr(res, 'outputs', None)
+        if t is None:
+            t = getattr(res, 't', None)
+        if y is None:
+            y = getattr(res, 'y', None) or getattr(res, 'yout', None)
+        if t is not None and y is not None:
+            t = np.asarray(t).reshape(-1)
+            y = np.asarray(y)
+            y = np.squeeze(y)
+            if y.ndim == 2:
+                y = y[0, :]
+            if y.shape[0] != t.shape[0] and y.shape[-1] == t.shape[0]:
+                y = y.T
+            # Se ainda não casar, forçamos shape seguro para evitar exceção
+            if y.shape[0] != t.shape[0]:
+                y = np.resize(y, t.shape[0])
+            return t, y.reshape(-1)
+    except Exception:
+        pass
+
+    # Fallback final via lsim
+    try:
+        tout, yout, _ = ctl.lsim(sys, U=U, T=T)
+        return np.asarray(tout).reshape(-1), np.squeeze(np.asarray(yout)).reshape(-1)
+    except Exception:
+        # Último recurso: zeros para manter a página responsiva
+        return T, np.zeros_like(T)
 # Página 4 — Malha fechada (sem filtro) + overlays + LaTeX
 @app.route('/atualizar_pagina4', methods=['POST'])
 def atualizar_pagina4():
@@ -311,14 +422,14 @@ def atualizar_pagina4():
     G_closed = ctl.feedback(L)
 
     # Respostas
-    T = np.linspace(0, 50, 1000)
-    _, yout_closed = ctl.step_response(G_closed, T)
+    T = np.linspace(0, 50, 1000, dtype=float)
+    T, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
 
-    u_ref = np.ones_like(T)
+    u_ref = np.ones_like(T, dtype=float)
     u_ref[T >= t_perturb_fechada] += amp_perturb_fechada
-    _, yout_closed_ref2 = ctl.forced_response(G_closed, T, u_ref)
+    _, yout_closed_ref2 = safe_forced_response(G_closed, T, u_ref)
 
-    _, yout_open = ctl.forced_response(G_planta, T, np.ones_like(T))
+    _, yout_open = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
 
     plot_closed_data = {
         "data": [
@@ -332,8 +443,8 @@ def atualizar_pagina4():
     # S(s) e Y/Q
     S = ctl.feedback(ctl.tf([1.0], [1.0]), L)  # E/R = 1/(1+L)
     Tq = ctl.feedback(G_planta, G_controlador)  # Y/Q = G/(1+CG)
-    _, e_step = ctl.step_response(S, T)
-    _, yq_step = ctl.step_response(Tq, T)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
     error_closed_data = {"data": [{"x": T.tolist(), "y": e_step.tolist(), "mode": "lines", "name": "E/R", "line": {"color": "#000000", "dash": "solid", "width": 2}}]}
     perturb_closed_data = {"data": [{"x": T.tolist(), "y": yq_step.tolist(), "mode": "lines", "name": "Y/Q", "line": {"dash": "dash", "color": "#9c27b0"}}]}
 
@@ -356,7 +467,7 @@ def atualizar_pagina4():
         F = ctl.tf([1.0], [1.0])
 
     Y_filt = F * G_closed
-    _, yout_filt = ctl.step_response(Y_filt, T)
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
     plot_closed_filt = {
         "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado", "line": {"width": 3}}],
         "layout": {"title": "Resposta ao Degrau (Malha Fechada + Filtro)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
@@ -504,9 +615,10 @@ def nyquist_pagina2():
     data = request.get_json()
     polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
     zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    ganho_planta = float(data.get("ganho_planta", 1.0))
 
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
+    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
     den_planta = np.poly(polos_planta)
     G_planta = ctl.tf(num_planta, den_planta)
 
@@ -636,7 +748,7 @@ def pid_simular():
     sys_cl = ctl.feedback(Gc*G, 1)
     T = np.linspace(0, 40, 400)
     T, y = ctl.step_response(sys_cl, T)
-    _, u = ctl.forced_response(Gc, T, 1 - y)
+    _, u = safe_forced_response(Gc, T, 1 - y)
 
     plot_processo = {"data": [{"x": T.tolist(), "y": y.tolist(), "type": "scatter", "name": "Saída do Processo"}],
                      "layout": {"title": "Saída do Processo", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "y(t)"}}}
@@ -759,13 +871,13 @@ def alocacao_polos_backend():
     poly_char_coeffs = np.polyadd(np.polymul(Dp, Dc), np.polymul(Np, Nc))
 
     T = np.linspace(0, 50, 1000)
-    _, yout_open_planta = ctl.step_response(G_planta, T)
-    _, yout_closed = ctl.step_response(G_closed, T)
+    _, yout_open_planta = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
+    _, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
 
     S = ctl.feedback(ctl.tf([1.0], [1.0]), L)
     Tq = ctl.feedback(G_planta, G_controlador)
-    _, e_step = ctl.step_response(S, T)
-    _, yq_step = ctl.step_response(Tq, T)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
 
     def ts5_open_from_poles(poles):
         poles = np.array(poles, dtype=complex)
@@ -840,7 +952,7 @@ def alocacao_polos_backend():
         F = ctl.tf([1.0], [1.0])
 
     Y_filt = F * G_closed
-    _, yout_filt = ctl.step_response(Y_filt, T)
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
 
     plot_closed_filt = {
         "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado", "line": { "width": 3}}],
@@ -1045,8 +1157,8 @@ def step_backend():
         sys = ctl.feedback(L)  # Y/R = L/(1+L)
         nome = "Y/R = CG/(1+CG)"
 
-    T = np.linspace(0, 10, 600)
-    _, y = ctl.step_response(sys, T)
+    T = np.linspace(0, 10, 600, dtype=float)
+    _, y = safe_forced_response(sys, T, np.ones_like(T, dtype=float))
     step_plot = {
         "data": [{"x": T.tolist(), "y": y.tolist(), "mode": "lines", "name": nome}],
         "layout": {"title": "Resposta ao Degrau", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
@@ -1058,16 +1170,18 @@ def atualizar_pagina2():
     data = request.get_json()
     polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
     zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    ganho_planta = float(data.get("ganho_planta", 1.0))
 
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
+    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
     den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
 
     G_planta = ctl.tf(num_planta, den_planta)
 
-    latex_planta_polinomial = f"\\[ G(s) = \\frac{{{latex_poly(num_planta, 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
-    latex_planta_fatorada   = f"\\[ G(s) = \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
-    latex_planta_parcial    = f"\\[ G(s) = {latex_partial_fraction(num_planta, den_planta, 's')[3:-3]} \\]"
+    K_str = "" if np.isclose(ganho_planta, 1.0, atol=1e-12) else f"{ganho_planta:.3g} \\cdot "
+    latex_planta_polinomial = f"\\[ G(s) = {K_str}\\frac{{{latex_poly(np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else [1.0], 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
+    latex_planta_fatorada   = f"\\[ G(s) = {K_str}\\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
+    latex_planta_parcial    = latex_partial_fraction(num_planta, den_planta, 's')
 
     zeros = np.roots(num_planta)
     polos = np.roots(den_planta)
@@ -1079,8 +1193,8 @@ def atualizar_pagina2():
         "layout": {"title": "Diagrama de Polos e Zeros", "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
     }
 
-    T = np.linspace(0, 20, 500)
-    _, yout = ctl.step_response(G_planta, T)
+    T = np.linspace(0, 20, 500, dtype=float)
+    _, yout = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
     plot_open_data = {
         "data": [{"x": T.tolist(), "y": yout.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Aberta)"}],
         "layout": {"title": "Resposta ao Degrau (Malha Aberta)", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
@@ -1108,8 +1222,8 @@ def sinais_backend():
     mod_zeros = np.abs(zeros)
     mod_polos = np.abs(polos)
 
-    T = np.linspace(0, 20, 500)
-    T, yout = ctl.step_response(G, T)
+    T = np.linspace(0, 20, 500, dtype=float)
+    T, yout = safe_forced_response(G, T, np.ones_like(T, dtype=float))
     latex_ft = f"\\[ G(s) = \\frac{{{latex_poly(num, 's')}}}{{{latex_poly(den, 's')}}} \\]"
 
     bode_data = None
@@ -1205,16 +1319,16 @@ def novo_grafico_fechado():
     G_controlador = ctl.tf(num_controlador, den_controlador)
     G_closed = ctl.feedback(G_planta * G_controlador)
 
-    T = np.linspace(0, 50, 1000)
-    _, yout_closed = ctl.step_response(G_closed, T)
+    T = np.linspace(0, 50, 1000, dtype=float)
+    _, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
 
     t_perturb_fechada = float(data.get("t_perturb_fechada", 20))
     amp_perturb_fechada = float(data.get("amp_perturb_fechada", 0.5))
-    u_ref = np.ones_like(T)
+    u_ref = np.ones_like(T, dtype=float)
     u_ref[T >= t_perturb_fechada] += amp_perturb_fechada
-    _, yout_closed_ref2 = ctl.forced_response(G_closed, T, u_ref)
+    _, yout_closed_ref2 = safe_forced_response(G_closed, T, u_ref)
 
-    _, yout_open = ctl.forced_response(G_planta, T, np.ones_like(T))
+    _, yout_open = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
 
     plot_closed_data = {
         "data": [
@@ -1228,8 +1342,8 @@ def novo_grafico_fechado():
     L = G_planta * G_controlador
     S = ctl.feedback(ctl.tf([1.0], [1.0]), L)
     Tq = ctl.feedback(G_planta, G_controlador)
-    _, e_step = ctl.step_response(S, T)
-    _, yq_step = ctl.step_response(Tq, T)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
 
     error_closed_data = {"data": [{"x": T.tolist(), "y": e_step.tolist(), "mode": "lines", "name": "E/R", "line": {"color": "#000000", "dash": "solid", "width": 2}}]}
     perturb_closed_data = {"data": [{"x": T.tolist(), "y": yq_step.tolist(), "mode": "lines", "name": "Y/Q", "line": {"dash": "dash", "color": "#9c27b0"}}]}
@@ -1254,7 +1368,7 @@ def novo_grafico_fechado():
         F = ctl.tf([1.0], [1.0])
 
     Y_filt = F * G_closed
-    _, yout_filt = ctl.step_response(Y_filt, T)
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
     plot_closed_filt = {
         "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado"}],
         "layout": {"title": "Resposta ao Degrau (Malha Fechada + Filtro)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
