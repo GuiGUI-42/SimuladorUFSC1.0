@@ -354,12 +354,21 @@
         </div>
     </div>
 
-    <!-- Modal FT da seleção -->
+    <!-- Modal FT da seleção (estrutura similar à Página 4) -->
     <div id="modal-ft-selecao" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1001;">
-        <div style="background:#fff; max-width:540px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 24px 28px; position:relative;">
+        <div style="background:#fff; max-width:560px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 28px 28px; position:relative;">
             <span style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;" onclick="fecharModalFtSelecao()">&times;</span>
-            <div style="font-size:1.1em; margin-bottom:12px;"><b>Função de Transferência Selecionada</b></div>
-            <div id="ft-selecao-text" class="latex"></div>
+            <div style="font-size:1.1em; margin-bottom:16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <b>Função de Transferência Selecionada</b>
+                <span id="ft-chip-aloc" class="ft-chip">Y/R</span>
+                <select id="ft-modal-select-aloc" style="margin-left:auto; font-size:0.75em;">
+                    <option value="fechada" selected>Y/R</option>
+                    <option value="aberta">Malha Aberta</option>
+                    <option value="erro">E/R</option>
+                    <option value="perturbacao">Y/Q</option>
+                </select>
+            </div>
+            <div id="ft-modal-conteudo-aloc" class="latex" style="text-align:center;"></div>
         </div>
     </div>
 
@@ -374,8 +383,21 @@
         let filtro_ativo = false;
         let polos_filtro = [];
         let ganho_filtro = 1.0;
-        // Mapa de LaTeX enviado pelo backend para o modal
+        // Mapa de LaTeX antigo (mantido para outros usos se necessário)
         const latex_modal_map = { aberta: "", fechada: "", erro: "", perturbacao: "" };
+        // Novo armazenamento completo das FTs (fatorada/parcial/tempo)
+        let allFtsAloc = { fechada:{}, aberta:{}, erro:{}, perturbacao:{} };
+        // Estilos adicionais reutilizados da Página 4
+        (function addFtModalStyles(){
+            const st = document.createElement('style');
+            st.textContent = `
+                .ft-chip { padding:2px 10px; border-radius:14px; background:#1976d2; color:#fff; font-size:0.75em; font-weight:600; }
+                body.dark-mode .ft-chip { background:#CF1259; }
+                .ft-section-title { text-align:center; margin:20px 0 6px; font-weight:600; }
+                .ft-expr { display:block; text-align:center; font-size:1.05em; margin:4px 0; }
+            `;
+            document.head.appendChild(st);
+        })();
 
         // Converte para backend: objetos -> números ou pares conjugados [re, im]
         function convertToBackend(arr) {
@@ -771,22 +793,58 @@
         function fecharModalTs(){ const m=document.getElementById('modal-ts'); if(m) m.style.display='none'; }
         function abrirModalPd(){ const m=document.getElementById('modal-pd'); if(m) m.style.display='block'; }
         function fecharModalPd(){ const m=document.getElementById('modal-pd'); if(m) m.style.display='none'; }
-        function abrirModalFtSelecao(){
-            const tipo = document.getElementById('tipo-resposta')?.value || 'fechada';
-            const padrao = {
-                aberta: "\\( G(s) \\)",
-                fechada: "\\( \\frac{Y(s)}{R(s)} = \\frac{G_c(s)\\,G(s)}{1 + G_c(s)\\,G(s)} \\)",
-                erro: "\\( \\frac{E(s)}{R(s)} = \\frac{1}{1 + G_c(s)\\,G(s)} \\)",
-                perturbacao: "\\( \\frac{Y(s)}{Q(s)} = \\frac{G(s)}{1 + G_c(s)\\,G(s)} \\)"
-            };
-            const tex = latex_modal_map[tipo] || padrao[tipo];
-            const el = document.getElementById('ft-selecao-text');
-            el.innerHTML = ensureWrappedLatex(tex);
+        // Mapeia tipos para backend
+        function mapTipoToBackend(t){
+            if(t==='fechada') return 'malha_fechada';
+            if(t==='aberta') return 'malha_aberta';
+            return t; // erro, perturbacao
+        }
+        async function fetchAllFtsAloc(){
+            try {
+                const payload = {
+                    polos_planta: convertToBackend(polos_planta),
+                    zeros_planta: convertToBackend(zeros_planta),
+                    polos_controlador: convertToBackend(polos_controlador),
+                    zeros_controlador: convertToBackend(zeros_controlador),
+                    ganho_controlador, ganho_planta,
+                    filtro_ativo, polos_filtro, ganho_filtro,
+                    tipo: mapTipoToBackend('fechada')
+                };
+                const resp = await fetch('/atualizar_pz_closed', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+                const json = await resp.json();
+                const fts = json.fts || {};
+                allFtsAloc = {
+                    fechada: fts.malha_fechada || {},
+                    aberta: fts.malha_aberta || {},
+                    erro: fts.erro || {},
+                    perturbacao: fts.perturbacao || {}
+                };
+            } catch(err){ console.error('Erro fetch FTs modal alocacao:', err); }
+        }
+        function renderModalFtAloc(){
+            const sel = document.getElementById('ft-modal-select-aloc')?.value || 'fechada';
+            const chip = document.getElementById('ft-chip-aloc');
+            if(chip){
+                let lbl = sel==='aberta'?'Malha Aberta': sel==='erro'?'E/R': sel==='perturbacao'?'Y/Q':'Y/R';
+                if(sel==='fechada' && filtro_ativo) lbl += ' + F(s)';
+                chip.textContent = lbl;
+            }
+            const dados = allFtsAloc[sel] || {};
+            let html='';
+            if(dados.fatorada) html += '<div class="ft-section-title">Forma Atual / Fatorada</div><div class="ft-expr">'+dados.fatorada+'</div>';
+            if(dados.parcial) html += '<div class="ft-section-title">Fração Parcial</div><div class="ft-expr">'+dados.parcial+'</div>';
+            if(dados.tempo) html += '<div class="ft-section-title">Resposta ao Degrau no Tempo Y(t)</div><div class="ft-expr">'+dados.tempo+'</div>';
+            document.getElementById('ft-modal-conteudo-aloc').innerHTML = html || '<em>Indisponível.</em>';
             typesetSafe();
-            const m = document.getElementById('modal-ft-selecao');
-            if (m) m.style.display = 'block';
+        }
+        async function abrirModalFtSelecao(){
+            await fetchAllFtsAloc();
+            renderModalFtAloc();
+            const m=document.getElementById('modal-ft-selecao'); if(m) m.style.display='block';
         }
         function fecharModalFtSelecao(){ const m=document.getElementById('modal-ft-selecao'); if(m) m.style.display='none'; }
+        document.addEventListener('DOMContentLoaded', ()=>{ document.getElementById('ft-modal-select-aloc')?.addEventListener('change', renderModalFtAloc); });
+        window.addEventListener('click', e=>{ const m=document.getElementById('modal-ft-selecao'); if(e.target===m) m.style.display='none'; });
 
         document.addEventListener('DOMContentLoaded', function () {
             // Menu hover

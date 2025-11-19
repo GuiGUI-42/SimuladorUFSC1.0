@@ -265,7 +265,12 @@
         </div>
         <!-- Seção Direita: Gráficos -->
         <div class="right-section">
-            <h3>Gráficos</h3>
+            <h3 style="display:flex; align-items:center; gap:10px;">Gráficos
+                <button id="btn-modal-ft-all-p2" title="Ver FTs" style="background:none; border:none; cursor:pointer; font-size:0.9em; color:#1976d2; display:flex; align-items:center; gap:4px;">
+                    <span style="display:inline-block; width:18px; height:18px; border:2px solid #1976d2; border-radius:50%; font-size:0.75em; line-height:14px; text-align:center;">i</span>
+                    <span style="font-weight:600; font-size:0.75em;">FTs</span>
+                </button>
+            </h3>
             <div style="margin-bottom: 2px; width: 100%;">
     <div style="display: flex; align-items: center;">
         <button id="seta-grafico-pz" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25B6;</button>
@@ -280,6 +285,13 @@
     </div>
     <div id="plot_open" style="display:none; width: 100%;"></div>
 </div>
+<div id="bode-container" style="width: 100%; margin-top: 8px;">
+    <div style="display: flex; align-items: center;">
+        <button id="seta-grafico-bode-p2" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25B6;</button>
+        <h4 style="margin: 0 8px 0 0;">Diagrama de Bode (Malha Aberta)</h4>
+    </div>
+    <div id="plot_bode_p2" style="display:none; width: 100%;"></div>
+</div>
         </div>
     </div>
 
@@ -293,12 +305,91 @@
         </div>
     </div>
 
+    <!-- Modal Todas as FTs (igual estrutura página4/alocacao) -->
+    <div id="modal-ft-all-p2" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1001;">
+        <div style="background:#fff; max-width:600px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 28px 28px; position:relative;">
+            <span style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;" id="fechar-modal-ft-all-p2">&times;</span>
+            <div style="font-size:1.05em; margin-bottom:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <b>Funções de Transferência</b>
+                <span id="ft-chip-pagina2" class="ft-chip">Y/R</span>
+                <select id="ft-modal-select-pagina2" style="margin-left:auto; font-size:0.75em;">
+                    <option value="fechada" selected>Y/R</option>
+                    <option value="aberta">Malha Aberta</option>
+                    <option value="erro">E/R</option>
+                    <option value="perturbacao">Y/Q</option>
+                </select>
+            </div>
+            <div id="ft-modal-conteudo-pagina2" class="latex" style="text-align:center;"></div>
+        </div>
+    </div>
+
     <script>
     // --- Estado dos polos e zeros da planta ---
     // Inicializa planta vazia (sem polos e sem zeros)
     let polosPlanta = [];
     let zerosPlanta = [];
     let ganhoPlanta = 1.0;
+    // Armazenamento completo das FTs (fatorada/parcial/tempo)
+    let allFtsP2 = { fechada:{}, aberta:{}, erro:{}, perturbacao:{} };
+    function mapTipoToBackend(t){
+        if(t==='fechada') return 'malha_fechada';
+        if(t==='aberta') return 'malha_aberta';
+        return t; // erro, perturbacao
+    }
+    async function fetchAllFtsP2(){
+        try {
+            const payload = {
+                polos_planta: polosPlanta, // já são números
+                zeros_planta: zerosPlanta,
+                ganho_planta: ganhoPlanta,
+                polos_controlador: [],
+                zeros_controlador: [],
+                ganho_controlador: 1.0,
+                filtro_ativo: false,
+                polos_filtro: [],
+                ganho_filtro: 1.0,
+                tipo: mapTipoToBackend('fechada')
+            };
+            const resp = await fetch('/atualizar_pz_closed', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            const json = await resp.json();
+            const fts = json.fts || {};
+            allFtsP2 = {
+                fechada: fts.malha_fechada || {},
+                aberta: fts.malha_aberta || {},
+                erro: fts.erro || {},
+                perturbacao: fts.perturbacao || {}
+            };
+            // Correção zeros na origem: injeta s ou s^{k} se numerador vier como 1
+            const kZeroZeros = zerosPlanta.filter(z => Math.abs(z) < 1e-8).length;
+            if (kZeroZeros > 0) {
+                const numPattern = /\\frac\{\s*1\s*\}/;
+                const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;
+                ['fechada','aberta','erro','perturbacao'].forEach(key => {
+                    const obj = allFtsP2[key];
+                    if (obj && obj.fatorada && numPattern.test(obj.fatorada)) {
+                        obj.fatorada = obj.fatorada.replace(numPattern, `\\frac{${sFactor}}`);
+                    }
+                });
+            }
+        } catch(e){ console.error('Erro carregando FTs pagina2:', e); }
+    }
+    function renderModalFtPagina2(){
+        const sel = document.getElementById('ft-modal-select-pagina2')?.value || 'fechada';
+        const chip = document.getElementById('ft-chip-pagina2');
+        if(chip){
+            let lbl = sel==='aberta'?'Malha Aberta': sel==='erro'?'E/R': sel==='perturbacao'?'Y/Q':'Y/R';
+            chip.textContent = lbl;
+        }
+        const dados = allFtsP2[sel] || {};
+        let html='';
+        if(dados.fatorada) html += '<div class="ft-section-title">Forma Atual / Fatorada</div><div class="ft-expr">'+dados.fatorada+'</div>';
+        if(dados.parcial) html += '<div class="ft-section-title">Fração Parcial</div><div class="ft-expr">'+dados.parcial+'</div>';
+        if(dados.tempo) html += '<div class="ft-section-title">Resposta ao Degrau no Tempo Y(t)</div><div class="ft-expr">'+dados.tempo+'</div>';
+        document.getElementById('ft-modal-conteudo-pagina2').innerHTML = html || '<em>Indisponível.</em>';
+        if(window.MathJax) MathJax.typesetPromise();
+    }
+    async function abrirModalFtAllP2(){ await fetchAllFtsP2(); renderModalFtPagina2(); document.getElementById('modal-ft-all-p2').style.display='block'; }
+    function fecharModalFtAllP2(){ document.getElementById('modal-ft-all-p2').style.display='none'; }
 
     // Função debounce
 function debounce(func, wait) {
@@ -441,9 +532,19 @@ async function atualizar() {
     function fixDenWithS(latex, k, varName = 's') { if (!latex || k <= 0) return latex; const sPart = k === 1 ? varName : `${varName}^${k}`; return latex.replace(/\}\{\s*1\s*\}/g, `}{${sPart}}`); }
 
     const kP0 = effectiveKZeroPoles(polosPlanta);
-    document.getElementById('latex_planta_polinomial').innerHTML = fixDenWithS(result.latex_planta_polinomial, kP0, 's') || "";
-    document.getElementById('latex_planta_fatorada').innerHTML   = fixDenWithS(result.latex_planta_fatorada, kP0, 's') || "";
-    document.getElementById('latex_planta_parcial').innerHTML    = fixDenWithS(result.latex_planta_parcial, kP0, 's') || "";
+    let latexPoli = fixDenWithS(result.latex_planta_polinomial, kP0, 's') || "";
+    let latexFat  = fixDenWithS(result.latex_planta_fatorada,   kP0, 's') || "";
+    let latexParc = fixDenWithS(result.latex_planta_parcial,    kP0, 's') || "";
+    const kZeroZeros = zerosPlanta.filter(z => Math.abs(z) < 1e-8).length;
+    if (kZeroZeros > 0) {
+        const numPattern = /\\frac\{\s*1\s*\}/;
+        const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;
+        if (numPattern.test(latexFat))  latexFat  = latexFat.replace(numPattern, `\\frac{${sFactor}}`);
+        if (numPattern.test(latexPoli)) latexPoli = latexPoli.replace(numPattern, `\\frac{${sFactor}}`);
+    }
+    document.getElementById('latex_planta_polinomial').innerHTML = latexPoli;
+    document.getElementById('latex_planta_fatorada').innerHTML   = latexFat;
+    document.getElementById('latex_planta_parcial').innerHTML    = latexParc;
     if (window.MathJax) MathJax.typesetPromise();
 
         Plotly.react('plot_pz', result.plot_pz_data.data, {
@@ -477,6 +578,22 @@ async function atualizar() {
         });
         const nyquistResult = await resNyquist.json();
         document.getElementById('nyquist-img').src = "data:image/png;base64," + nyquistResult.nyquist_img;
+
+        // Atualiza Bode (malha aberta da planta)
+        try {
+            const resBode = await fetch('/bode_pagina2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const bodeJson = await resBode.json();
+            Plotly.react('plot_bode_p2', bodeJson.bode_data.data, {
+                ...bodeJson.bode_data.layout,
+                width: 850,
+                height: 400
+            }, {responsive: false});
+        } catch (e) { console.warn('Falha ao atualizar Bode pagina2:', e); }
+
         forcePlotlyResize();
     }
 
@@ -555,10 +672,13 @@ async function atualizar() {
         document.getElementById('seta-grafico-open').innerHTML = "&#x25B6;";
         document.getElementById('nyquist-img').style.display = "none";
         document.getElementById('seta-grafico-nyquist').innerHTML = "&#x25B6;";
+        document.getElementById('plot_bode_p2').style.display = "none";
+        document.getElementById('seta-grafico-bode-p2').innerHTML = "&#x25B6;";
 
         toggleSection('seta-grafico-pz', 'plot_pz');
         toggleSection('seta-grafico-open', 'plot_open');
         toggleSection('seta-grafico-nyquist', 'nyquist-img');
+        toggleSection('seta-grafico-bode-p2', 'plot_bode_p2');
 
         // Feedback modal
         document.getElementById('abrir-feedback').onclick = function() {
@@ -612,7 +732,32 @@ async function atualizar() {
         darkModeToggle.addEventListener('change', function(event) {
             setDarkMode(event.target.checked);
         });
+        // Modal todas FTs
+        document.getElementById('btn-modal-ft-all-p2').onclick = abrirModalFtAllP2;
+        document.getElementById('fechar-modal-ft-all-p2').onclick = fecharModalFtAllP2;
+        document.getElementById('ft-modal-select-pagina2').onchange = renderModalFtPagina2;
+        window.addEventListener('click', (e)=>{ const m=document.getElementById('modal-ft-all-p2'); if(e.target===m) fecharModalFtAllP2(); });
     });
     </script>
+    <script>
+    // Ajuste de tamanho dos gráficos se o container muda
+    function forcePlotlyResize(){
+        try {
+            const ids = ['plot_pz','plot_open','plot_bode_p2'];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.style.display !== 'none') {
+                    Plotly.Plots.resize(el);
+                }
+            });
+        } catch(e) { /* silencioso */ }
+    }
+    </script>
+    <style>
+        .ft-chip { padding:2px 10px; border-radius:14px; background:#1976d2; color:#fff; font-size:0.75em; font-weight:600; }
+        body.dark-mode .ft-chip { background:#CF1259; }
+        .ft-section-title { text-align:center; margin:20px 0 6px; font-weight:600; }
+        .ft-expr { display:block; text-align:center; font-size:1.05em; margin:4px 0; }
+    </style>
 </body>
 </html>

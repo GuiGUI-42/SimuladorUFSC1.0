@@ -215,7 +215,9 @@ def atualizar():
     latex_open = "\\[ G_{{open}}(s) = G_{{planta}}(s) \\cdot G_{{controlador}}(s) \\]"
     latex_closed = "\\[ G_{{closed}}(s) = \\frac{{G_{{open}}(s)}}{{1 + G_{{open}}(s)}} \\]"
 
-    T, yout_step = ctl.step_response(G)
+    # Resposta ao degrau usando scipy.signal.step
+    system = (np.array(G.num[0][0]), np.array(G.den[0][0]))
+    T, yout_step = scipy.signal.step(system, T=np.linspace(0, 50, 1000))
     T_long = np.linspace(0, 50, 1000)
     t_perturb = float(data.get("t_perturb", 20))
     amp_perturb = float(data.get("amp_perturb", 0.5))
@@ -238,7 +240,7 @@ def atualizar():
     })
 
 
-# Bode e Nyquist (planta*controlador em malha aberta)
+# Bode e Nyquist
 @app.route('/atualizar_bode', methods=['POST'])
 def atualizar_bode():
     data = request.get_json()
@@ -247,31 +249,70 @@ def atualizar_bode():
     polos_controlador = parse_polos_zeros(data.get("polos_controlador", [-1]))
     zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", [0]))
     ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    ganho_planta = float(data.get("ganho_planta", 1.0))
 
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    polos_planta_filtrados = [p for p in polos_planta if abs(p) > 1e-8]
-    zeros_controlador_filtrados = [z for z in zeros_controlador if abs(z) > 1e-8]
-    polos_controlador_filtrados = [p for p in polos_controlador if abs(p) > 1e-8]
+    # NÃO remover polos/zeros em 0: integrores e zeros na origem são reais
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
 
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
-    den_planta = np.poly(polos_planta_filtrados) if polos_planta_filtrados else np.array([1.0])
-    num_controlador = ganho_controlador * (np.poly(zeros_controlador_filtrados) if zeros_controlador_filtrados else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador_filtrados) if polos_controlador_filtrados else np.array([1.0])
-
-    num_open = np.polymul(num_planta, num_controlador)
-    den_open = np.polymul(den_planta, den_controlador)
-    G_open = ctl.tf(num_open, den_open)
+    # Malha fechada Y/R por padrão nesta rota (página 4)
+    L = ctl.tf(np.polymul(num_controlador, num_planta), np.polymul(den_controlador, den_planta))
+    try:
+        L = ctl.minreal(L, verbose=False)
+    except Exception:
+        pass
+    G_closed = ctl.feedback(L)
+    try:
+        G_closed = ctl.minreal(G_closed, verbose=False)
+    except Exception:
+        pass
 
     omega = np.logspace(-2, 2, 500)
-    mag, phase, omega = ctl.bode(G_open, omega=omega, dB=True, plot=False)
+    mag, phase, omega = ctl.bode(G_closed, omega=omega, dB=False, plot=False)
 
     bode_data = {
         "data": [
-            {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude"},
-            {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase", "yaxis": "y2"}
+            {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude (Y/R)"},
+            {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase (Y/R)", "yaxis": "y2"}
         ],
         "layout": {
-            "title": "Diagrama de Bode",
+            "title": "Diagrama de Bode (Malha Fechada Y/R)",
+            "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
+            "yaxis": {"title": "Magnitude (dB)"},
+            "yaxis2": {"title": "Fase (graus)", "overlaying": "y", "side": "right"},
+            "legend": {"x": 0, "y": 1.1, "orientation": "h"}
+        }
+    }
+    return jsonify({"bode_data": bode_data})
+
+@app.route('/bode_pagina2', methods=['POST'])
+def bode_pagina2():
+    data = request.get_json()
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    ganho_planta = float(data.get("ganho_planta", 1.0))
+
+    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
+    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    G_planta = ctl.tf(num_planta, den_planta)
+    try:
+        G_planta = ctl.minreal(G_planta, verbose=False)
+    except Exception:
+        pass
+
+    omega = np.logspace(-2, 2, 500)
+    mag, phase, omega = ctl.bode(G_planta, omega=omega, dB=False, plot=False)
+
+    bode_data = {
+        "data": [
+            {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude (G)"},
+            {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase (G)", "yaxis": "y2"}
+        ],
+        "layout": {
+            "title": "Diagrama de Bode (Malha Aberta - Planta)",
             "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
             "yaxis": {"title": "Magnitude (dB)"},
             "yaxis2": {"title": "Fase (graus)", "overlaying": "y", "side": "right"},
@@ -288,18 +329,19 @@ def nyquist_pagina4():
     polos_controlador = parse_polos_zeros(data.get("polos_controlador", [-1]))
     zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", [0]))
     ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    ganho_planta = float(data.get("ganho_planta", 1.0))
 
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    polos_planta_filtrados = [p for p in polos_planta if abs(p) > 1e-8]
-    zeros_controlador_filtrados = [z for z in zeros_controlador if abs(z) > 1e-8]
-    polos_controlador_filtrados = [p for p in polos_controlador if abs(p) > 1e-8]
-
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
-    den_planta = np.poly(polos_planta_filtrados) if polos_planta_filtrados else np.array([1.0])
-    num_controlador = ganho_controlador * (np.poly(zeros_controlador_filtrados) if zeros_controlador_filtrados else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador_filtrados) if polos_controlador_filtrados else np.array([1.0])
+    # Preservar polos/zeros em 0 (integradores/zeros na origem)
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
 
     G_open = ctl.tf(np.polymul(num_planta, num_controlador), np.polymul(den_planta, den_controlador))
+    try:
+        G_open = ctl.minreal(G_open, verbose=False)
+    except Exception:
+        pass
 
     fig, ax = plt.subplots(figsize=(7, 4))
     ctl.nyquist_plot(G_open, omega=np.logspace(-2, 2, 500), ax=ax, color='b')
@@ -568,6 +610,10 @@ def atualizar_pz_closed():
 
     # LaTeX da FT selecionada (já com filtro se aplicável)
     latex_ft_sel = f"\\( {latex_frac_factored_from_coeffs(num, den, 's')} \\)"
+    try:
+        latex_ft_parcial = latex_partial_fraction(num, den, 's')
+    except Exception:
+        latex_ft_parcial = "\\[ \\text{Erro ao gerar fração parcial} \\]"
 
     plot_pz_closed = {
         "data": [
@@ -577,11 +623,130 @@ def atualizar_pz_closed():
         "layout": {"title": titulo, "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
     }
 
+    # --- NOVO: gerar mapa completo de FTs para o modal independente do DPZ ---
+    def _latex_for_system(G):
+        n_ = np.array(G.num).flatten()
+        d_ = np.array(G.den).flatten()
+        fatorada_ = f"\\( {latex_frac_factored_from_coeffs(n_, d_, 's')} \\)"
+        try:
+            parcial_ = latex_partial_fraction(n_, d_, 's')
+        except Exception:
+            parcial_ = "\\[ \\text{Erro ao gerar fração parcial} \\]"
+        # Tempo (Resposta ao DEGRAU): usar frações parciais de G(s)/s
+        # Y(s) frente a degrau unitário = G(s)/s  => y(t) = L^{-1}{G(s)/s}
+        try:
+            # Convolui denominador com [1,0] para adicionar fator s
+            den_step = np.convolve(d_, [1.0, 0.0])
+            # Obtém resíduos usando scipy.signal.residue
+            r_step, p_step, k_step = scipy.signal.residue(n_, den_step)
+
+            # Agrupa pares conjugados para gerar forma real com cos/sin
+            usados = set()
+            termos_real = []
+            const_term = 0.0
+
+            for idx, (ri, pi) in enumerate(zip(r_step, p_step)):
+                # Polo ~ 0 => termo constante (A/s -> A)
+                if abs(np.real(pi)) < 1e-12 and abs(np.imag(pi)) < 1e-12:
+                    const_term += np.real(ri)  # ri deve ser real para polo exato em 0
+                    continue
+                # Ignora se já combinado em par complexo
+                if idx in usados:
+                    continue
+                a = float(np.real(pi))
+                b = float(np.imag(pi))
+                A = float(np.real(ri))
+                B = float(np.imag(ri))
+                if abs(b) < 1e-12:  # polo real
+                    # Termo: A e^{a t}
+                    if abs(A) > 1e-12 or abs(B) > 1e-12:
+                        coef = complex(A, B)
+                        # Se coef quase real, mostra só parte real
+                        if abs(np.imag(coef)) < 1e-10:
+                            termos_real.append(f"{np.real(coef):.4g} e^{{{a:.4g} t}}")
+                        else:
+                            # Raro (resíduo complexo para polo real) => mostra complexo
+                            sgn = '+' if np.imag(coef) >= 0 else '−'
+                            termos_real.append(f"({np.real(coef):.4g} {sgn} {abs(np.imag(coef)):.4g}j) e^{{{a:.4g} t}}")
+                else:  # polo complexo => buscar conjugado
+                    # Procura índice do conjugado
+                    found_conj = None
+                    for j in range(idx+1, len(p_step)):
+                        if j in usados:
+                            continue
+                        pj = p_step[j]
+                        if abs(np.real(pj) - a) < 1e-12 and abs(np.imag(pj) + b) < 1e-12:
+                            found_conj = j
+                            break
+                    if found_conj is not None:
+                        usados.add(found_conj)
+                        # Combinação: r e^{(a+jb)t} + r* e^{(a-jb)t} = 2 e^{a t} [A cos(bt) - B sin(bt)]
+                        termo_cos = 2*A
+                        termo_sin = -2*B
+                        # Monta expressão: e^{a t}(C cos(b t) + D sin(b t))
+                        # Simplifica sinais
+                        parte = []
+                        if abs(termo_cos) > 1e-12:
+                            parte.append(f"{termo_cos:.4g} \\cos({abs(b):.4g} t)")
+                        if abs(termo_sin) > 1e-12:
+                            sinal = ''
+                            # termo_sin já tem sinal dentro do valor
+                            parte.append(f"{termo_sin:.4g} \\sin({abs(b):.4g} t)")
+                        if len(parte) == 0:
+                            # Caso extremo todos coeficientes nulos
+                            continue
+                        parte_str = ' '.join(parte).replace('+ -', '- ')  # ajuste estetico
+                        if abs(a) > 1e-12:
+                            termos_real.append(f"e^{{{a:.4g} t}} ( {parte_str} )")
+                        else:
+                            termos_real.append(f"{parte_str}")
+                    else:
+                        # Sem conjugado (numérico) => mostra bruto
+                        termos_real.append(f"({A:.4g}{'+' if B>=0 else '−'}{abs(B):.4g}j) e^{{{a:.4g}{'+' if b>=0 else '−'}{abs(b):.4g}j t}}")
+
+            # Adiciona parte polinomial k_step (termo constante adicional)
+            if k_step is not None and len(k_step) > 0:
+                # k_step é vetor de coeficientes de polinômio em s (descendente); para passo normalmente só constante
+                # Somamos todos que representam contribuição estática
+                for ki in k_step:
+                    if abs(ki) > 1e-12 and abs(np.imag(ki)) < 1e-12:
+                        const_term += float(np.real(ki))
+
+            # Constrói expressão LaTeX
+            termos_latex = []
+            if abs(const_term) > 1e-12:
+                termos_latex.append(f"{const_term:.4g}")
+            termos_latex.extend(termos_real)
+            if len(termos_latex) == 0:
+                tempo_ = "\\[ Y(t) = 0 \\]"
+            else:
+                expr = ' + '.join(termos_latex).replace('+ -', '- ').replace('  ', ' ')
+                expr = expr.replace('--', '+')
+                tempo_ = f"\\[ Y(t) = {expr} \\]"
+        except Exception:
+            tempo_ = "\\[ Y(t) = \\text{indisponível} \\]"
+        return {"fatorada": fatorada_, "parcial": parcial_, "tempo": tempo_}
+
+    G_closed_all = ctl.feedback(L)                # Y/R base
+    G_closed_filt_all = F * G_closed_all           # Y/R com filtro
+    G_open_all = G_planta                          # Malha Aberta
+    G_error_all = ctl.feedback(ctl.tf([1.0],[1.0]), L)  # E/R
+    G_pert_all = ctl.feedback(G_planta, G_controlador)  # Y/Q
+
+    fts_map = {
+        "malha_fechada": _latex_for_system(G_closed_filt_all),  # já inclui filtro se ativo
+        "malha_aberta": _latex_for_system(G_open_all),
+        "erro": _latex_for_system(G_error_all),
+        "perturbacao": _latex_for_system(G_pert_all)
+    }
+
     return jsonify({
         "plot_pz_closed": plot_pz_closed,
         "den_cl": den.tolist(),
         "poles_cl": [{"re": float(np.real(p)), "im": float(np.imag(p))} for p in polos],
-        "latex_ft_sel": latex_ft_sel
+        "latex_ft_sel": latex_ft_sel,
+        "latex_ft_parcial": latex_ft_parcial,
+        "fts": fts_map
     })
 
 
@@ -617,10 +782,14 @@ def nyquist_pagina2():
     zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
+    # Preservar zeros em 0 (s) na planta
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
     den_planta = np.poly(polos_planta)
     G_planta = ctl.tf(num_planta, den_planta)
+    try:
+        G_planta = ctl.minreal(G_planta, verbose=False)
+    except Exception:
+        pass
 
     fig, ax = plt.subplots(figsize=(7, 4))
     ctl.nyquist_plot(G_planta, omega=np.logspace(-2, 2, 500), ax=ax, color='b')

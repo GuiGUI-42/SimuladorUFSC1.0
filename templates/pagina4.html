@@ -90,6 +90,13 @@
         font-size: 0.95em;  background: #ffffff;
     }
     .seta-grafico-btn { background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px; }
+    .ft-chip { display:inline-block; padding:2px 10px; border-radius:14px; background:#1976d2; color:#fff; font-size:0.75em; font-weight:600; }
+    body.dark-mode .ft-chip { background:#CF1259; }
+    /* Padronização modal FTs */
+    #modal-pz-ft #pz-ft-latex { text-align:center; }
+    #modal-pz-ft .ft-section-title { text-align:center; margin:20px 0 4px; font-weight:600; }
+    #modal-pz-ft .ft-expr { display:block; text-align:center; font-size:1.05em; margin:4px 0; }
+    #modal-pz-ft .ft-expr .MathJax { font-size:1.05em !important; }
     </style>
 </head>
 <body style="margin:0; background:#f3f3f7;">
@@ -233,7 +240,7 @@
             background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001;
             min-width: 350px; margin-bottom: 0; display: flex; flex-direction: column;
         ">
-            <h3>Gráficos</h3>
+            <h3 style="display:flex;align-items:center;gap:8px;">Gráficos <button id="btn-modal-ft-all" class="info-icon" title="Mostrar FTs do sistema">i</button></h3>
 
             <!-- Resposta ao Degrau -->
             <div style="display: flex; align-items: center; margin-bottom: 4px;">
@@ -270,7 +277,6 @@
                     <option value="erro">Erro E/R</option>
                     <option value="perturbacao">Y/Q</option>
                 </select>
-                <button id="btn-pz-ft" class="info-icon" title="Mostrar FT da seleção" style="margin-left:8px;">i</button>
             </div>
             <div id="container-plot-pz-closed" style="margin-bottom: 16px;display: none;">
                 <div id="plot_pz_closed"></div>
@@ -278,7 +284,16 @@
                 <div id="modal-pz-ft" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1000;">
                 <div style="background:#fff; max-width:540px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 24px 28px; position:relative;">
                         <span id="fechar-modal-pz-ft" style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;">&times;</span>
-                        <div style="font-size:1.1em; margin-bottom:12px;"><b>Função de Transferência Selecionada</b></div>
+                        <div style="font-size:1.1em; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <b>Função de Transferência Selecionada</b>
+                            <span id="ft-label-selecionada" class="ft-chip"></span>
+                            <select id="ft-modal-select" style="margin-left:auto; font-size:0.75em;">
+                                <option value="malha_fechada" selected>Y/R</option>
+                                <option value="malha_aberta">Malha Aberta</option>
+                                <option value="erro">E/R</option>
+                                <option value="perturbacao">Y/Q</option>
+                            </select>
+                        </div>
                         <div id="pz-ft-latex" class="latex-container"></div>
                     </div>
                 </div>
@@ -796,7 +811,8 @@
             zeros_planta: convertToBackend(zerosPlanta),
             polos_controlador: convertToBackend(polosControlador),
             zeros_controlador: convertToBackend(zerosControlador),
-            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value)
+            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value),
+            ganho_planta: parseFloat(document.getElementById('ganho-planta').value)
         };
         const res = await fetch('/nyquist_pagina4', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -805,7 +821,8 @@
         const json = await res.json();
         document.getElementById('nyquist-img').src = "data:image/png;base64," + json.nyquist_img;
     }
-    let pzLatexSel = "";
+    let pzLatexSel = ""; // forma fatorada/atual
+    let pzLatexSelParcial = ""; // fração parcial
 
     async function atualizarPZClosed() {
     const tipo = document.getElementById('tipo-diagrama-pz').value;
@@ -844,14 +861,68 @@
     } else {
         pzLatexSel = json.latex_ft_sel;
     }
+    pzLatexSelParcial = json.latex_ft_parcial || "";
 }
+    // Atualiza label de tipo da FT após processamento
+    const tipoAtual = document.getElementById('tipo-diagrama-pz').value;
+    const labelEl = document.getElementById('ft-label-selecionada');
+    if (labelEl) {
+        let lbl;
+        if (tipoAtual === 'perturbacao') lbl = 'Y/Q';
+        else if (tipoAtual === 'erro') lbl = 'E/R';
+        else if (tipoAtual === 'malha_aberta') lbl = 'Malha Aberta';
+        else lbl = 'Y/R';
+        if (tipoAtual === 'malha_fechada' && filtroAtivo) lbl += ' + F(s)';
+        labelEl.textContent = lbl;
+    }
 }
     document.getElementById('tipo-diagrama-pz').onchange = atualizarPZClosed;
-    document.getElementById('btn-pz-ft').onclick = function () {
-        document.getElementById('pz-ft-latex').innerHTML = pzLatexSel || "";
+    let allFts = {}; // mapa retornado do backend
+    async function fetchAllFtsParaModal() {
+        const data = {
+            polos_planta: convertToBackend(polosPlanta),
+            zeros_planta: convertToBackend(zerosPlanta),
+            polos_controlador: convertToBackend(polosControlador),
+            zeros_controlador: convertToBackend(zerosControlador),
+            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value),
+            ganho_planta: parseFloat(document.getElementById('ganho-planta').value),
+            filtro_ativo: filtroAtivo,
+            polos_filtro: polosFiltro,
+            ganho_filtro: ganhoFiltro,
+            tipo: document.getElementById('tipo-diagrama-pz').value // qualquer, backend agora devolve todas
+        };
+        const res = await fetch('/atualizar_pz_closed', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const json = await res.json();
+        allFts = json.fts || {};
+    }
+    function renderModalFTSelecionada() {
+        const sel = document.getElementById('ft-modal-select').value;
+        const container = document.getElementById('pz-ft-latex');
+        const labelEl = document.getElementById('ft-label-selecionada');
+        let lbl;
+        if (sel === 'perturbacao') lbl = 'Y/Q';
+        else if (sel === 'erro') lbl = 'E/R';
+        else if (sel === 'malha_aberta') lbl = 'Malha Aberta';
+        else lbl = 'Y/R';
+        if (sel === 'malha_fechada' && filtroAtivo) lbl += ' + F(s)';
+        if (labelEl) labelEl.textContent = lbl;
+        const dados = allFts[sel] || {};
+        let html = '';
+        if (dados.fatorada) html += '<div class="ft-section-title">Forma Atual / Fatorada</div><div class="ft-expr">' + dados.fatorada + '</div>';
+        if (dados.parcial) html += '<div class="ft-section-title">Fração Parcial</div><div class="ft-expr">' + dados.parcial + '</div>';
+        if (dados.tempo) html += '<div class="ft-section-title">Resposta ao Degrau no Tempo Y(t)</div><div class="ft-expr">' + dados.tempo + '</div>';
+        container.innerHTML = html || '<em>Nenhuma FT disponível.</em>';
         if (window.MathJax) MathJax.typesetPromise();
+    }
+    document.getElementById('btn-modal-ft-all').onclick = async function () {
+        await fetchAllFtsParaModal();
+        renderModalFTSelecionada();
         document.getElementById('modal-pz-ft').style.display = 'block';
     };
+    document.getElementById('ft-modal-select').onchange = renderModalFTSelecionada;
     document.getElementById('fechar-modal-pz-ft').onclick = function () {
         document.getElementById('modal-pz-ft').style.display = 'none';
     };
@@ -866,7 +937,8 @@
             zeros_planta: convertToBackend(zerosPlanta),
             polos_controlador: convertToBackend(polosControlador),
             zeros_controlador: convertToBackend(zerosControlador),
-            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value)
+            ganho_controlador: parseFloat(document.getElementById('ganho-controlador').value),
+            ganho_planta: parseFloat(document.getElementById('ganho-planta').value)
         };
         const res = await fetch('/atualizar_bode', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
