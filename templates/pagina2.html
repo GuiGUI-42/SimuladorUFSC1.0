@@ -37,8 +37,8 @@
             border-color: #CF1259 !important; /* Escolha a cor desejada */
         }
         .left-section {
-            flex: 0 0 30%;
-            width: 30%;
+            flex: 0 0 40%;
+            width: 40%;
             border: 2px solid #ffffff;
             min-width: 350px;
             background: #fff;
@@ -89,13 +89,13 @@
             margin-bottom: 6px;
         }
         .param-input {
-            width: 55px;
+            width: 10px;
             min-width: 0;
             margin-right: 2px;
         }
         .param-input[type="number"] {
-    border: 2px solid #fff !important;
-    background: #f9f9fb;
+    border: 2px solid #ffffff !important;
+    background: #ffffff;
     border-radius: 4px;
 }
         .param-slider {
@@ -208,8 +208,6 @@
                 <span id="dark-mode-icon">🌙</span>
             </label>
             <a href="/principal" class="menu-link" style="margin-top:16px;">Página Inicial</a>
-            <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Sinais e Sistemas</div>
-            <a href="/sinais" class="menu-link" style="margin-top:0;">Resposta do Sistema</a>
             <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Controle</div>
             <a href="/alocacao" class="menu-link" style="margin-top:0;">Alocação de Polos</a>
             <a href="/raizes" class="menu-link" style="margin-top:0;">Lugar das Raízes</a>
@@ -325,12 +323,32 @@
 
     <script>
     // --- Estado dos polos e zeros da planta ---
-    // Inicializa planta vazia (sem polos e sem zeros)
     let polosPlanta = [];
     let zerosPlanta = [];
     let ganhoPlanta = 1.0;
     // Armazenamento completo das FTs (fatorada/parcial/tempo)
     let allFtsP2 = { fechada:{}, aberta:{}, erro:{}, perturbacao:{} };
+
+    // Converte itens para o backend respeitando "useImag"
+    function convertToBackend(arr) {
+        const out = [];
+        for (const p of arr) {
+            if (p && typeof p === 'object' && 'real' in p) {
+                const re = Number(p.real) || 0;
+                const im = Number(p.imag) || 0;
+                const useImag = !!p.useImag;
+                if (useImag && Math.abs(im) > 1e-12) {
+                    out.push([re, im], [re, -im]);
+                } else {
+                    out.push(re);
+                }
+            } else {
+                out.push(Number(p) || 0);
+            }
+        }
+        return out;
+    }
+
     function mapTipoToBackend(t){
         if(t==='fechada') return 'malha_fechada';
         if(t==='aberta') return 'malha_aberta';
@@ -339,8 +357,8 @@
     async function fetchAllFtsP2(){
         try {
             const payload = {
-                polos_planta: polosPlanta, // já são números
-                zeros_planta: zerosPlanta,
+                polos_planta: convertToBackend(polosPlanta),
+                zeros_planta: convertToBackend(zerosPlanta),
                 ganho_planta: ganhoPlanta,
                 polos_controlador: [],
                 zeros_controlador: [],
@@ -360,7 +378,7 @@
                 perturbacao: fts.perturbacao || {}
             };
             // Correção zeros na origem: injeta s ou s^{k} se numerador vier como 1
-            const kZeroZeros = zerosPlanta.filter(z => Math.abs(z) < 1e-8).length;
+            const kZeroZeros = zerosPlanta.filter(z => Math.abs(z.real) < 1e-8 && !z.useImag).length;
             if (kZeroZeros > 0) {
                 const numPattern = /\\frac\{\s*1\s*\}/;
                 const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;
@@ -409,28 +427,48 @@ function renderPlantaInputs() {
     const polosList = document.getElementById('polos-list');
     polosList.innerHTML = '';
     polosPlanta.forEach((val, idx) => {
+        if (!(val && typeof val === 'object' && 'real' in val)) {
+            polosPlanta[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+            val = polosPlanta[idx];
+        }
+        let real = Number(val.real) || 0;
+        let imag = Number(val.imag) || 0;
+        let checked = val.useImag ? 'checked' : '';
         const row = document.createElement('div');
         row.className = 'input-row';
         row.innerHTML = `
-            <input type="range" class="param-slider" id="polo-planta-slider-${idx}" min="-10" max="1" step="0.01" value="${val}">
-            <input type="number" class="param-input" id="polo-planta-input-${idx}" min="-10" max="1" step="0.01" value="${val}">
+            <input type="range" class="param-slider" id="polo-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+            <input type="number" id="polo-planta-input-${idx}" step="0.01" min="-10" max="10" value="${real}"style="width:40px;">
+            <label>
+                <input type="checkbox" id="polo-planta-imag-check-${idx}" style="accent-color:#2196f3; border-radius:50%;" ${checked}>
+                <i>Im</i>
+            </label>
+            <input type="number" id="polo-planta-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:40px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
             <button type="button" class="remove-btn" id="remove-polo-${idx}" title="Remover Polo">&times;</button>
         `;
         polosList.appendChild(row);
 
-        // Input numérico
         document.getElementById(`polo-planta-input-${idx}`).oninput = function() {
-            polosPlanta[idx] = parseFloat(this.value);
+            polosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`polo-planta-slider-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Slider
         document.getElementById(`polo-planta-slider-${idx}`).oninput = function() {
-            polosPlanta[idx] = parseFloat(this.value);
+            polosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`polo-planta-input-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Remover
+        document.getElementById(`polo-planta-imag-check-${idx}`).onchange = function() {
+            const imagInput = document.getElementById(`polo-planta-imag-input-${idx}`);
+            polosPlanta[idx].useImag = this.checked;
+            imagInput.style.display = this.checked ? 'inline-block' : 'none';
+            if (!this.checked) polosPlanta[idx].imag = 0;
+            atualizarDebounced();
+        };
+        document.getElementById(`polo-planta-imag-input-${idx}`).oninput = function() {
+            polosPlanta[idx].imag = Number(this.value) || 0;
+            atualizarDebounced();
+        };
         document.getElementById(`remove-polo-${idx}`).onclick = function() {
             polosPlanta.splice(idx, 1);
             renderPlantaInputs();
@@ -442,28 +480,48 @@ function renderPlantaInputs() {
     const zerosList = document.getElementById('zeros-list');
     zerosList.innerHTML = '';
     zerosPlanta.forEach((val, idx) => {
+        if (!(val && typeof val === 'object' && 'real' in val)) {
+            zerosPlanta[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+            val = zerosPlanta[idx];
+        }
+        let real = Number(val.real) || 0;
+        let imag = Number(val.imag) || 0;
+        let checked = val.useImag ? 'checked' : '';
         const row = document.createElement('div');
         row.className = 'input-row';
         row.innerHTML = `
-            <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
-            <input type="number" class="param-input" id="zero-planta-input-${idx}" min="-10" max="10" step="0.01" value="${val}">
+            <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+            <input type="number" id="zero-planta-input-${idx}" step="0.01" min="-10" max="10" value="${real}"style="width:40px;">
+            <label>
+                <input type="checkbox" id="zero-planta-imag-check-${idx}" style="accent-color:#2196f3; border-radius:50%;" ${checked}>
+                <i>Im</i>
+            </label>
+            <input type="number" id="zero-planta-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:40px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
             <button type="button" class="remove-btn" id="remove-zero-${idx}" title="Remover Zero">&times;</button>
         `;
         zerosList.appendChild(row);
 
-        // Input numérico
         document.getElementById(`zero-planta-input-${idx}`).oninput = function() {
-            zerosPlanta[idx] = parseFloat(this.value);
+            zerosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`zero-planta-slider-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Slider
         document.getElementById(`zero-planta-slider-${idx}`).oninput = function() {
-            zerosPlanta[idx] = parseFloat(this.value);
+            zerosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`zero-planta-input-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Remover
+        document.getElementById(`zero-planta-imag-check-${idx}`).onchange = function() {
+            const imagInput = document.getElementById(`zero-planta-imag-input-${idx}`);
+            zerosPlanta[idx].useImag = this.checked;
+            imagInput.style.display = this.checked ? 'inline-block' : 'none';
+            if (!this.checked) zerosPlanta[idx].imag = 0;
+            atualizarDebounced();
+        };
+        document.getElementById(`zero-planta-imag-input-${idx}`).oninput = function() {
+            zerosPlanta[idx].imag = Number(this.value) || 0;
+            atualizarDebounced();
+        };
         document.getElementById(`remove-zero-${idx}`).onclick = function() {
             zerosPlanta.splice(idx, 1);
             renderPlantaInputs();
@@ -475,18 +533,18 @@ function renderPlantaInputs() {
 // --- Botões para adicionar polos e zeros ---
 function setupPlantaBtns() {
     document.getElementById('add-polo-btn').onclick = function() {
-        polosPlanta.push(-1);
+        polosPlanta.push({ real: -1, imag: 0, useImag: false });
         renderPlantaInputs();
         atualizar();
     };
     document.getElementById('add-zero-btn').onclick = function() {
         if (zerosPlanta.length < polosPlanta.length) {
-        zerosPlanta.push(0);
-        renderPlantaInputs();
-        atualizar();
-    } else {
-        alert("Não é permitido adicionar mais zeros que polos!");
-    }
+            zerosPlanta.push({ real: 0, imag: 0, useImag: false });
+            renderPlantaInputs();
+            atualizar();
+        } else {
+            alert("Não é permitido adicionar mais zeros que polos!");
+        }
     };
 }
 
@@ -501,22 +559,12 @@ function setupGanhoPlanta() {
 
 // --- Atualização dos gráficos e LaTeX ---
 async function atualizar() {
-    // Monta arrays atuais dos polos/zeros
-    const polos = polosPlanta.map((_, idx) =>
-        parseFloat(document.getElementById(`polo-planta-input-${idx}`).value)
-    );
-    const zeros = zerosPlanta.map((_, idx) =>
-        parseFloat(document.getElementById(`zero-planta-input-${idx}`)?.value ?? 0)
-    );
-    polosPlanta = polos;
-    zerosPlanta = zeros;
-    // atualiza ganho a partir do input (garantia)
     const gpEl = document.getElementById('ganho-planta');
-    if (gpEl) ganhoPlanta = parseFloat(gpEl.value)||ganhoPlanta;
+    if (gpEl) ganhoPlanta = parseFloat(gpEl.value) || ganhoPlanta;
 
     const data = {
-        polos_planta: polosPlanta,
-        zeros_planta: zerosPlanta,
+        polos_planta: convertToBackend(polosPlanta),
+        zeros_planta: convertToBackend(zerosPlanta),
         ganho_planta: ganhoPlanta
     };
     const res = await fetch('/atualizar_pagina2', {
@@ -531,11 +579,11 @@ async function atualizar() {
     function effectiveKZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr) || arr.length === 0) return 0; return countZeroPoles(arr, tol); }
     function fixDenWithS(latex, k, varName = 's') { if (!latex || k <= 0) return latex; const sPart = k === 1 ? varName : `${varName}^${k}`; return latex.replace(/\}\{\s*1\s*\}/g, `}{${sPart}}`); }
 
-    const kP0 = effectiveKZeroPoles(polosPlanta);
+    const kP0 = effectiveKZeroPoles(convertToBackend(polosPlanta));
     let latexPoli = fixDenWithS(result.latex_planta_polinomial, kP0, 's') || "";
     let latexFat  = fixDenWithS(result.latex_planta_fatorada,   kP0, 's') || "";
     let latexParc = fixDenWithS(result.latex_planta_parcial,    kP0, 's') || "";
-    const kZeroZeros = zerosPlanta.filter(z => Math.abs(z) < 1e-8).length;
+    const kZeroZeros = zerosPlanta.filter(z => Math.abs(z.real) < 1e-8 && !z.useImag).length;
     if (kZeroZeros > 0) {
         const numPattern = /\\frac\{\s*1\s*\}/;
         const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;

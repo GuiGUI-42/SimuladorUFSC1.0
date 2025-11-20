@@ -93,8 +93,6 @@
                     <span id="dark-mode-icon">🌙</span>
                 </label>
                 <a href="/principal" class="menu-link" style="margin-top:16px;">Página Inicial</a>
-                <div>Sinais e Sistemas</div>
-                <a href="/sinais" class="menu-link" style="margin-top:0;">Resposta do Sistema</a>
                 <div>Controle</div>
                 <a href="/raizes" class="menu-link" style="margin-top:0;">Lugar das Raízes</a>
                 <a href="/malhaaberta" class="menu-link" style="margin-top:0;">Malha Aberta</a>
@@ -476,23 +474,46 @@
             const container = document.getElementById(listId);
             container.innerHTML = '';
             arr.forEach((val, idx) => {
+                if (!(val && typeof val === 'object' && 'real' in val)) {
+                    arr[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+                    val = arr[idx];
+                }
+                const real = Number(val.real) || 0;
+                const imag = Number(val.imag) || 0;
+                const checked = val.useImag ? 'checked' : '';
                 const row = document.createElement('div');
                 row.className = 'param-row';
                 row.innerHTML = `
-                    <input type="range" class="param-slider" id="${type}-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
-                    <input type="number" class="input-inline" id="${type}-input-${idx}" value="${val}">
+                    <input type="range" class="param-slider" id="${type}-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+                    <input type="number" class="input-inline" id="${type}-real-${idx}" step="0.01" value="${real}">
+                    <label>
+                        <input type="checkbox" id="${type}-imag-check-${idx}" ${checked} style="accent-color:#2196f3;">
+                        <i>Im</i>
+                    </label>
+                    <input type="number" class="input-inline" id="${type}-imag-${idx}" step="0.01" value="${imag}" style="display:${val.useImag ? 'inline-block' : 'none'}; width:70px;">
                     <button class="remove-btn" onclick="removeParam('${type}',${idx})">x</button>
                 `;
                 container.appendChild(row);
 
-                document.getElementById(`${type}-input-${idx}`).oninput = function() {
-                    arr[idx] = parseFloat(this.value);
+                document.getElementById(`${type}-slider-${idx}`).oninput = function() {
+                    arr[idx].real = parseFloat(this.value);
+                    document.getElementById(`${type}-real-${idx}`).value = this.value;
+                    updateAllDebounced();
+                };
+                document.getElementById(`${type}-real-${idx}`).oninput = function() {
+                    arr[idx].real = parseFloat(this.value);
                     document.getElementById(`${type}-slider-${idx}`).value = this.value;
                     updateAllDebounced();
                 };
-                document.getElementById(`${type}-slider-${idx}`).oninput = function() {
-                    arr[idx] = parseFloat(this.value);
-                    document.getElementById(`${type}-input-${idx}`).value = this.value;
+                document.getElementById(`${type}-imag-check-${idx}`).onchange = function() {
+                    arr[idx].useImag = this.checked;
+                    const imInput = document.getElementById(`${type}-imag-${idx}`);
+                    if (this.checked) imInput.style.display = 'inline-block';
+                    else { imInput.style.display = 'none'; arr[idx].imag = 0; }
+                    updateAllDebounced();
+                };
+                document.getElementById(`${type}-imag-${idx}`).oninput = function() {
+                    arr[idx].imag = parseFloat(this.value) || 0;
                     updateAllDebounced();
                 };
             });
@@ -525,9 +546,9 @@
 
         function addParam(type) {
             if (type === 'planta-polos') polos_planta.push({ real: -1, imag: 0, useImag: false });
-            if (type === 'planta-zeros') zeros_planta.push(0);
+            if (type === 'planta-zeros') zeros_planta.push({ real: 0, imag: 0, useImag: false });
             if (type === 'controlador-polos') polos_controlador.push({ real: -1, imag: 0, useImag: false });
-            if (type === 'controlador-zeros') zeros_controlador.push(0);
+            if (type === 'controlador-zeros') zeros_controlador.push({ real: 0, imag: 0, useImag: false });
             if (type === 'filtro-polos') polos_filtro.push(-1);
             updateParamLists(); renderFiltroParamList(); updateAll();
         }

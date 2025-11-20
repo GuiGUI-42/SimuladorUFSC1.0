@@ -290,12 +290,10 @@ def atualizar_bode():
 @app.route('/bode_pagina2', methods=['POST'])
 def bode_pagina2():
     data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
     ganho_planta = float(data.get("ganho_planta", 1.0))
-
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
     den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
     G_planta = ctl.tf(num_planta, den_planta)
     try:
@@ -324,18 +322,23 @@ def bode_pagina2():
 @app.route('/nyquist_pagina4', methods=['POST'])
 def nyquist_pagina4():
     data = request.get_json()
-    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
-    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
-    polos_controlador = parse_polos_zeros(data.get("polos_controlador", [-1]))
-    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", [0]))
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    polos_controlador = [float(p) for p in data.get("polos_controlador", [-1])]
+    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [0])]
     ganho_controlador = float(data.get("ganho_controlador", 1.0))
-    ganho_planta = float(data.get("ganho_planta", 1.0))
 
-    # Preservar polos/zeros em 0 (integradores/zeros na origem)
-    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
+    polos_planta_filtrados = [p for p in polos_planta if abs(p) > 1e-8]
+    zeros_controlador_filtrados = [z for z in zeros_controlador if abs(z) > 1e-8]
+    polos_controlador_filtrados = [p for p in polos_controlador if abs(p) > 1e-8]
+
+    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
+    den_planta = np.poly(polos_planta_filtrados) if polos_planta_filtrados else np.array([1.0])
+    num_controlador = np.poly(zeros_controlador_filtrados) if zeros_controlador_filtrados else np.array([1.0])
+    num_controlador = ganho_controlador * num_controlador
+    den_controlador = np.poly(polos_controlador_filtrados) if polos_controlador_filtrados else np.array([1.0])
+
 
     G_open = ctl.tf(np.polymul(num_planta, num_controlador), np.polymul(den_planta, den_controlador))
     try:
@@ -778,8 +781,8 @@ def enviar_feedback():
 @app.route('/nyquist_pagina2', methods=['POST'])
 def nyquist_pagina2():
     data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
     # Preservar zeros em 0 (s) na planta
@@ -1337,8 +1340,8 @@ def step_backend():
 @app.route('/atualizar_pagina2', methods=['POST'])
 def atualizar_pagina2():
     data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]

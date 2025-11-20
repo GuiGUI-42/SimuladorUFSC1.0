@@ -113,8 +113,6 @@
                 <span id="dark-mode-icon">🌙</span>
             </label>
             <a href="/principal" class="menu-link" style="margin-top:16px;">Página Inicial</a>
-            <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Sinais e Sistemas</div>
-            <a href="/sinais" class="menu-link" style="margin-top:0;">Resposta do Sistema</a>
             <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Controle</div>
             <a href="/alocacao" class="menu-link" style="margin-top:0;">Alocação de Polos</a>
             <a href="/raizes" class="menu-link" style="margin-top:0;">Lugar das Raízes</a>
@@ -431,22 +429,49 @@
         const zerosList = document.getElementById('planta-zeros-list');
         zerosList.innerHTML = '';
         zerosPlanta.forEach((val, idx) => {
+            if (!(val && typeof val === 'object' && 'real' in val)) {
+                zerosPlanta[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+                val = zerosPlanta[idx];
+            }
+            let real = Number(val.real) || 0;
+            let imag = Number(val.imag) || 0;
+            let checked = val.useImag ? 'checked' : '';
             const row = document.createElement('div');
             row.className = 'input-row';
             row.innerHTML = `
-                <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
-                <input type="number" id="zero-planta-input-${idx}" step="0.01" min="-10" max="10" value="${val}">
+                <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+                <input type="number" id="zero-planta-input-${idx}" step="0.01" min="-10" max="10" value="${real}">
+                <label >
+                    <input type="checkbox" id="zero-planta-imag-check-${idx}" style="accent-color:#2196f3; border-radius:50%;" ${checked}>
+                    <i>Im</i>
+                </label>
+                <input type="number" id="zero-planta-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:55px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
                 <button type="button" class="remove-btn" id="remove-planta-zero-${idx}" title="Remover Zero">&times;</button>
             `;
             zerosList.appendChild(row);
             document.getElementById(`zero-planta-input-${idx}`).oninput = function() {
-                zerosPlanta[idx] = parseFloat(this.value);
+                zerosPlanta[idx].real = Number(this.value) || 0;
                 document.getElementById(`zero-planta-slider-${idx}`).value = this.value;
                 atualizarTudoDebounced();
             };
             document.getElementById(`zero-planta-slider-${idx}`).oninput = function() {
-                zerosPlanta[idx] = parseFloat(this.value);
                 document.getElementById(`zero-planta-input-${idx}`).value = this.value;
+                zerosPlanta[idx].real = Number(this.value) || 0;
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`zero-planta-imag-check-${idx}`).onchange = function() {
+                const imagInput = document.getElementById(`zero-planta-imag-input-${idx}`);
+                zerosPlanta[idx].useImag = this.checked;
+                if (this.checked) {
+                    imagInput.style.display = 'inline-block';
+                } else {
+                    imagInput.style.display = 'none';
+                    zerosPlanta[idx].imag = 0;
+                }
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`zero-planta-imag-input-${idx}`).oninput = function() {
+                zerosPlanta[idx].imag = Number(this.value) || 0;
                 atualizarTudoDebounced();
             };
             document.getElementById(`remove-planta-zero-${idx}`).onclick = function() {
@@ -517,22 +542,49 @@
         const zerosListC = document.getElementById('controlador-zeros-list');
         zerosListC.innerHTML = '';
         zerosControlador.forEach((val, idx) => {
+            if (!(val && typeof val === 'object' && 'real' in val)) {
+                zerosControlador[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+                val = zerosControlador[idx];
+            }
+            let real = Number(val.real) || 0;
+            let imag = Number(val.imag) || 0;
+            let checked = val.useImag ? 'checked' : '';
             const row = document.createElement('div');
             row.className = 'input-row';
             row.innerHTML = `
-                <input type="range" class="param-slider" id="zero-controlador-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
-                <input type="number" id="zero-controlador-input-${idx}" step="0.01" min="-10" max="10" value="${val}">
+                <input type="range" class="param-slider" id="zero-controlador-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+                <input type="number" id="zero-controlador-input-${idx}" step="0.01" min="-10" max="10" value="${real}">
+                <label >
+                    <input type="checkbox" id="zero-controlador-imag-check-${idx}" style="accent-color:#2196f3; border-radius:100%;" ${checked}>
+                    <i>Im</i>
+                </label>
+                <input type="number" id="zero-controlador-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:55px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
                 <button type="button" class="remove-btn" id="remove-controlador-zero-${idx}" title="Remover Zero">&times;</button>
             `;
             zerosListC.appendChild(row);
             document.getElementById(`zero-controlador-input-${idx}`).oninput = function() {
-                zerosControlador[idx] = parseFloat(this.value);
+                zerosControlador[idx].real = Number(this.value) || 0;
                 document.getElementById(`zero-controlador-slider-${idx}`).value = this.value;
                 atualizarTudoDebounced();
             };
             document.getElementById(`zero-controlador-slider-${idx}`).oninput = function() {
-                zerosControlador[idx] = parseFloat(this.value);
                 document.getElementById(`zero-controlador-input-${idx}`).value = this.value;
+                zerosControlador[idx].real = Number(this.value) || 0;
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`zero-controlador-imag-check-${idx}`).onchange = function() {
+                const imagInput = document.getElementById(`zero-controlador-imag-input-${idx}`);
+                zerosControlador[idx].useImag = this.checked;
+                if (this.checked) {
+                    imagInput.style.display = 'inline-block';
+                } else {
+                    imagInput.style.display = 'none';
+                    zerosControlador[idx].imag = 0;
+                }
+                atualizarTudoDebounced();
+            };
+            document.getElementById(`zero-controlador-imag-input-${idx}`).oninput = function() {
+                zerosControlador[idx].imag = Number(this.value) || 0;
                 atualizarTudoDebounced();
             };
             document.getElementById(`remove-controlador-zero-${idx}`).onclick = function() {
