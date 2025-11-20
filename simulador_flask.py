@@ -290,6 +290,8 @@ def atualizar_bode():
 @app.route('/bode_pagina2', methods=['POST'])
 def bode_pagina2():
     data = request.get_json()
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
     ganho_planta = float(data.get("ganho_planta", 1.0))
     polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
     zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
@@ -781,8 +783,8 @@ def enviar_feedback():
 @app.route('/nyquist_pagina2', methods=['POST'])
 def nyquist_pagina2():
     data = request.get_json()
-    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
-    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
     # Preservar zeros em 0 (s) na planta
@@ -1340,8 +1342,8 @@ def step_backend():
 @app.route('/atualizar_pagina2', methods=['POST'])
 def atualizar_pagina2():
     data = request.get_json()
-    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
-    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
