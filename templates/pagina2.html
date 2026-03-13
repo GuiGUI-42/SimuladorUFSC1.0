@@ -37,8 +37,8 @@
             border-color: #CF1259 !important; /* Escolha a cor desejada */
         }
         .left-section {
-            flex: 0 0 30%;
-            width: 30%;
+            flex: 0 0 40%;
+            width: 40%;
             border: 2px solid #ffffff;
             min-width: 350px;
             background: #fff;
@@ -89,13 +89,13 @@
             margin-bottom: 6px;
         }
         .param-input {
-            width: 55px;
+            width: 10px;
             min-width: 0;
             margin-right: 2px;
         }
         .param-input[type="number"] {
-    border: 2px solid #fff !important;
-    background: #f9f9fb;
+    border: 2px solid #ffffff !important;
+    background: #ffffff;
     border-radius: 4px;
 }
         .param-slider {
@@ -208,8 +208,6 @@
                 <span id="dark-mode-icon">🌙</span>
             </label>
             <a href="/principal" class="menu-link" style="margin-top:16px;">Página Inicial</a>
-            <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Sinais e Sistemas</div>
-            <a href="/sinais" class="menu-link" style="margin-top:0;">Resposta do Sistema</a>
             <div style="margin-top:16px; margin-bottom:2px; font-weight:bold; color:#1976d2;">Controle</div>
             <a href="/alocacao" class="menu-link" style="margin-top:0;">Alocação de Polos</a>
             <a href="/raizes" class="menu-link" style="margin-top:0;">Lugar das Raízes</a>
@@ -238,6 +236,13 @@
                         <button type="button" class="add-btn" id="add-zero-btn">Adicionar Zero</button>
                     </div>
                 </div>
+                <div class="param-section" id="ganho-section" style="margin-top:8px;">
+                    <div class="param-title" style="font-size:1em;font-weight:normal;margin-bottom:4px;">Ganho da Planta (K):</div>
+                    <div class="input-row" style="gap:8px;">
+                        <input type="range" class="param-slider" id="ganho-planta-slider" min="-50" max="50" step="0.01" value="1">
+                        <input type="number" class="param-input" id="ganho-planta" min="-50" max="50" step="0.01" value="1">
+                    </div>
+                </div>
                 <div style="margin-top: 16px;">
                     <b>Função de Transferência da Planta:</b>
                     <select id="select-ft-planta" style="margin-left: 8px;">
@@ -258,7 +263,12 @@
         </div>
         <!-- Seção Direita: Gráficos -->
         <div class="right-section">
-            <h3>Gráficos</h3>
+            <h3 style="display:flex; align-items:center; gap:10px;">Gráficos
+                <button id="btn-modal-ft-all-p2" title="Ver FTs" style="background:none; border:none; cursor:pointer; font-size:0.9em; color:#1976d2; display:flex; align-items:center; gap:4px;">
+                    <span style="display:inline-block; width:18px; height:18px; border:2px solid #1976d2; border-radius:50%; font-size:0.75em; line-height:14px; text-align:center;">i</span>
+                    <span style="font-weight:600; font-size:0.75em;">FTs</span>
+                </button>
+            </h3>
             <div style="margin-bottom: 2px; width: 100%;">
     <div style="display: flex; align-items: center;">
         <button id="seta-grafico-pz" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25B6;</button>
@@ -273,6 +283,13 @@
     </div>
     <div id="plot_open" style="display:none; width: 100%;"></div>
 </div>
+<div id="bode-container" style="width: 100%; margin-top: 8px;">
+    <div style="display: flex; align-items: center;">
+        <button id="seta-grafico-bode-p2" class="seta-grafico-btn" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#2196f3;margin-right:6px;">&#x25B6;</button>
+        <h4 style="margin: 0 8px 0 0;">Diagrama de Bode (Malha Aberta)</h4>
+    </div>
+    <div id="plot_bode_p2" style="display:none; width: 100%;"></div>
+</div>
         </div>
     </div>
 
@@ -286,10 +303,111 @@
         </div>
     </div>
 
+    <!-- Modal Todas as FTs (igual estrutura página4/alocacao) -->
+    <div id="modal-ft-all-p2" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.25); z-index:1001;">
+        <div style="background:#fff; max-width:600px; margin:60px auto; border-radius:12px; box-shadow:0 4px 24px #0003; padding:32px 28px 28px 28px; position:relative;">
+            <span style="position:absolute; top:12px; right:18px; font-size:1.5em; cursor:pointer; color:#0074d9;" id="fechar-modal-ft-all-p2">&times;</span>
+            <div style="font-size:1.05em; margin-bottom:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <b>Funções de Transferência</b>
+                <span id="ft-chip-pagina2" class="ft-chip">Y/R</span>
+                <select id="ft-modal-select-pagina2" style="margin-left:auto; font-size:0.75em;">
+                    <option value="fechada" selected>Y/R</option>
+                    <option value="aberta">Malha Aberta</option>
+                    <option value="erro">E/R</option>
+                    <option value="perturbacao">Y/Q</option>
+                </select>
+            </div>
+            <div id="ft-modal-conteudo-pagina2" class="latex" style="text-align:center;"></div>
+        </div>
+    </div>
+
     <script>
     // --- Estado dos polos e zeros da planta ---
-    let polosPlanta = [-1];
-    let zerosPlanta = [0];
+    let polosPlanta = [];
+    let zerosPlanta = [];
+    let ganhoPlanta = 1.0;
+    // Armazenamento completo das FTs (fatorada/parcial/tempo)
+    let allFtsP2 = { fechada:{}, aberta:{}, erro:{}, perturbacao:{} };
+
+    // Converte itens para o backend respeitando "useImag"
+    function convertToBackend(arr) {
+        const out = [];
+        for (const p of arr) {
+            if (p && typeof p === 'object' && 'real' in p) {
+                const re = Number(p.real) || 0;
+                const im = Number(p.imag) || 0;
+                const useImag = !!p.useImag;
+                if (useImag && Math.abs(im) > 1e-12) {
+                    out.push([re, im], [re, -im]);
+                } else {
+                    out.push(re);
+                }
+            } else {
+                out.push(Number(p) || 0);
+            }
+        }
+        return out;
+    }
+
+    function mapTipoToBackend(t){
+        if(t==='fechada') return 'malha_fechada';
+        if(t==='aberta') return 'malha_aberta';
+        return t; // erro, perturbacao
+    }
+    async function fetchAllFtsP2(){
+        try {
+            const payload = {
+                polos_planta: convertToBackend(polosPlanta),
+                zeros_planta: convertToBackend(zerosPlanta),
+                ganho_planta: ganhoPlanta,
+                polos_controlador: [],
+                zeros_controlador: [],
+                ganho_controlador: 1.0,
+                filtro_ativo: false,
+                polos_filtro: [],
+                ganho_filtro: 1.0,
+                tipo: mapTipoToBackend('fechada')
+            };
+            const resp = await fetch('/atualizar_pz_closed', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+            const json = await resp.json();
+            const fts = json.fts || {};
+            allFtsP2 = {
+                fechada: fts.malha_fechada || {},
+                aberta: fts.malha_aberta || {},
+                erro: fts.erro || {},
+                perturbacao: fts.perturbacao || {}
+            };
+            // Correção zeros na origem: injeta s ou s^{k} se numerador vier como 1
+            const kZeroZeros = zerosPlanta.filter(z => Math.abs(z.real) < 1e-8 && !z.useImag).length;
+            if (kZeroZeros > 0) {
+                const numPattern = /\\frac\{\s*1\s*\}/;
+                const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;
+                ['fechada','aberta','erro','perturbacao'].forEach(key => {
+                    const obj = allFtsP2[key];
+                    if (obj && obj.fatorada && numPattern.test(obj.fatorada)) {
+                        obj.fatorada = obj.fatorada.replace(numPattern, `\\frac{${sFactor}}`);
+                    }
+                });
+            }
+        } catch(e){ console.error('Erro carregando FTs pagina2:', e); }
+    }
+    function renderModalFtPagina2(){
+        const sel = document.getElementById('ft-modal-select-pagina2')?.value || 'fechada';
+        const chip = document.getElementById('ft-chip-pagina2');
+        if(chip){
+            let lbl = sel==='aberta'?'Malha Aberta': sel==='erro'?'E/R': sel==='perturbacao'?'Y/Q':'Y/R';
+            chip.textContent = lbl;
+        }
+        const dados = allFtsP2[sel] || {};
+        let html='';
+        if(dados.fatorada) html += '<div class="ft-section-title">Forma Atual / Fatorada</div><div class="ft-expr">'+dados.fatorada+'</div>';
+        if(dados.parcial) html += '<div class="ft-section-title">Fração Parcial</div><div class="ft-expr">'+dados.parcial+'</div>';
+        if(dados.tempo) html += '<div class="ft-section-title">Resposta ao Degrau no Tempo Y(t)</div><div class="ft-expr">'+dados.tempo+'</div>';
+        document.getElementById('ft-modal-conteudo-pagina2').innerHTML = html || '<em>Indisponível.</em>';
+        if(window.MathJax) MathJax.typesetPromise();
+    }
+    async function abrirModalFtAllP2(){ await fetchAllFtsP2(); renderModalFtPagina2(); document.getElementById('modal-ft-all-p2').style.display='block'; }
+    function fecharModalFtAllP2(){ document.getElementById('modal-ft-all-p2').style.display='none'; }
 
     // Função debounce
 function debounce(func, wait) {
@@ -309,34 +427,52 @@ function renderPlantaInputs() {
     const polosList = document.getElementById('polos-list');
     polosList.innerHTML = '';
     polosPlanta.forEach((val, idx) => {
+        if (!(val && typeof val === 'object' && 'real' in val)) {
+            polosPlanta[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+            val = polosPlanta[idx];
+        }
+        let real = Number(val.real) || 0;
+        let imag = Number(val.imag) || 0;
+        let checked = val.useImag ? 'checked' : '';
         const row = document.createElement('div');
         row.className = 'input-row';
         row.innerHTML = `
-            <input type="range" class="param-slider" id="polo-planta-slider-${idx}" min="-10" max="1" step="0.01" value="${val}">
-            <input type="number" class="param-input" id="polo-planta-input-${idx}" min="-10" max="1" step="0.01" value="${val}">
+            <input type="range" class="param-slider" id="polo-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+            <input type="number" id="polo-planta-input-${idx}" step="0.01" min="-10" max="10" value="${real}"style="width:40px;">
+            <label>
+                <input type="checkbox" id="polo-planta-imag-check-${idx}" style="accent-color:#2196f3; border-radius:50%;" ${checked}>
+                <i>Im</i>
+            </label>
+            <input type="number" id="polo-planta-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:40px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
             <button type="button" class="remove-btn" id="remove-polo-${idx}" title="Remover Polo">&times;</button>
         `;
         polosList.appendChild(row);
 
-        // Input numérico
         document.getElementById(`polo-planta-input-${idx}`).oninput = function() {
-            polosPlanta[idx] = parseFloat(this.value);
+            polosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`polo-planta-slider-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Slider
         document.getElementById(`polo-planta-slider-${idx}`).oninput = function() {
-            polosPlanta[idx] = parseFloat(this.value);
+            polosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`polo-planta-input-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Remover
+        document.getElementById(`polo-planta-imag-check-${idx}`).onchange = function() {
+            const imagInput = document.getElementById(`polo-planta-imag-input-${idx}`);
+            polosPlanta[idx].useImag = this.checked;
+            imagInput.style.display = this.checked ? 'inline-block' : 'none';
+            if (!this.checked) polosPlanta[idx].imag = 0;
+            atualizarDebounced();
+        };
+        document.getElementById(`polo-planta-imag-input-${idx}`).oninput = function() {
+            polosPlanta[idx].imag = Number(this.value) || 0;
+            atualizarDebounced();
+        };
         document.getElementById(`remove-polo-${idx}`).onclick = function() {
-            if (polosPlanta.length > 1) {
-                polosPlanta.splice(idx, 1);
-                renderPlantaInputs();
-                atualizarDebounced();
-            }
+            polosPlanta.splice(idx, 1);
+            renderPlantaInputs();
+            atualizarDebounced();
         };
     });
 
@@ -344,28 +480,48 @@ function renderPlantaInputs() {
     const zerosList = document.getElementById('zeros-list');
     zerosList.innerHTML = '';
     zerosPlanta.forEach((val, idx) => {
+        if (!(val && typeof val === 'object' && 'real' in val)) {
+            zerosPlanta[idx] = { real: Number(val) || 0, imag: 0, useImag: false };
+            val = zerosPlanta[idx];
+        }
+        let real = Number(val.real) || 0;
+        let imag = Number(val.imag) || 0;
+        let checked = val.useImag ? 'checked' : '';
         const row = document.createElement('div');
         row.className = 'input-row';
         row.innerHTML = `
-            <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${val}">
-            <input type="number" class="param-input" id="zero-planta-input-${idx}" min="-10" max="10" step="0.01" value="${val}">
+            <input type="range" class="param-slider" id="zero-planta-slider-${idx}" min="-10" max="10" step="0.01" value="${real}">
+            <input type="number" id="zero-planta-input-${idx}" step="0.01" min="-10" max="10" value="${real}"style="width:40px;">
+            <label>
+                <input type="checkbox" id="zero-planta-imag-check-${idx}" style="accent-color:#2196f3; border-radius:50%;" ${checked}>
+                <i>Im</i>
+            </label>
+            <input type="number" id="zero-planta-imag-input-${idx}" step="0.01" min="-10" max="10" value="${imag}" style="width:40px; margin-left:4px; display:${val.useImag ? 'inline-block' : 'none'};">
             <button type="button" class="remove-btn" id="remove-zero-${idx}" title="Remover Zero">&times;</button>
         `;
         zerosList.appendChild(row);
 
-        // Input numérico
         document.getElementById(`zero-planta-input-${idx}`).oninput = function() {
-            zerosPlanta[idx] = parseFloat(this.value);
+            zerosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`zero-planta-slider-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Slider
         document.getElementById(`zero-planta-slider-${idx}`).oninput = function() {
-            zerosPlanta[idx] = parseFloat(this.value);
+            zerosPlanta[idx].real = Number(this.value) || 0;
             document.getElementById(`zero-planta-input-${idx}`).value = this.value;
             atualizarDebounced();
         };
-        // Remover
+        document.getElementById(`zero-planta-imag-check-${idx}`).onchange = function() {
+            const imagInput = document.getElementById(`zero-planta-imag-input-${idx}`);
+            zerosPlanta[idx].useImag = this.checked;
+            imagInput.style.display = this.checked ? 'inline-block' : 'none';
+            if (!this.checked) zerosPlanta[idx].imag = 0;
+            atualizarDebounced();
+        };
+        document.getElementById(`zero-planta-imag-input-${idx}`).oninput = function() {
+            zerosPlanta[idx].imag = Number(this.value) || 0;
+            atualizarDebounced();
+        };
         document.getElementById(`remove-zero-${idx}`).onclick = function() {
             zerosPlanta.splice(idx, 1);
             renderPlantaInputs();
@@ -377,36 +533,39 @@ function renderPlantaInputs() {
 // --- Botões para adicionar polos e zeros ---
 function setupPlantaBtns() {
     document.getElementById('add-polo-btn').onclick = function() {
-        polosPlanta.push(-1);
+        polosPlanta.push({ real: -1, imag: 0, useImag: false });
         renderPlantaInputs();
         atualizar();
     };
     document.getElementById('add-zero-btn').onclick = function() {
         if (zerosPlanta.length < polosPlanta.length) {
-        zerosPlanta.push(0);
-        renderPlantaInputs();
-        atualizar();
-    } else {
-        alert("Não é permitido adicionar mais zeros que polos!");
-    }
+            zerosPlanta.push({ real: 0, imag: 0, useImag: false });
+            renderPlantaInputs();
+            atualizar();
+        } else {
+            alert("Não é permitido adicionar mais zeros que polos!");
+        }
     };
+}
+
+// --- Ganho da planta slider/input ---
+function setupGanhoPlanta() {
+    const slider = document.getElementById('ganho-planta-slider');
+    const input = document.getElementById('ganho-planta');
+    if (!slider || !input) return;
+    slider.oninput = function(){ input.value = this.value; ganhoPlanta = parseFloat(this.value)||0; atualizarDebounced(); };
+    input.oninput = function(){ slider.value = this.value; ganhoPlanta = parseFloat(this.value)||0; atualizarDebounced(); };
 }
 
 // --- Atualização dos gráficos e LaTeX ---
 async function atualizar() {
-    // Monta arrays atuais dos polos/zeros
-    const polos = polosPlanta.map((_, idx) =>
-        parseFloat(document.getElementById(`polo-planta-input-${idx}`).value)
-    );
-    const zeros = zerosPlanta.map((_, idx) =>
-        parseFloat(document.getElementById(`zero-planta-input-${idx}`)?.value ?? 0)
-    );
-    polosPlanta = polos;
-    zerosPlanta = zeros;
+    const gpEl = document.getElementById('ganho-planta');
+    if (gpEl) ganhoPlanta = parseFloat(gpEl.value) || ganhoPlanta;
 
     const data = {
-        polos_planta: polosPlanta,
-        zeros_planta: zerosPlanta
+        polos_planta: convertToBackend(polosPlanta),
+        zeros_planta: convertToBackend(zerosPlanta),
+        ganho_planta: ganhoPlanta
     };
     const res = await fetch('/atualizar_pagina2', {
         method: 'POST',
@@ -415,10 +574,26 @@ async function atualizar() {
     });
     const result = await res.json();
 
-    document.getElementById('latex_planta_polinomial').innerHTML = result.latex_planta_polinomial || "Erro ao carregar forma polinomial";
-document.getElementById('latex_planta_fatorada').innerHTML = result.latex_planta_fatorada || "Erro ao carregar forma fatorada";
-document.getElementById('latex_planta_parcial').innerHTML = result.latex_planta_parcial || "Erro ao carregar fração parcial";
-if (window.MathJax) MathJax.typesetPromise();
+    // Helpers (mesmos que em pagina4)
+    function countZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr)) return 0; return arr.filter(p => Math.abs(p) < tol).length; }
+    function effectiveKZeroPoles(arr, tol = 1e-8) { if (!Array.isArray(arr) || arr.length === 0) return 0; return countZeroPoles(arr, tol); }
+    function fixDenWithS(latex, k, varName = 's') { if (!latex || k <= 0) return latex; const sPart = k === 1 ? varName : `${varName}^${k}`; return latex.replace(/\}\{\s*1\s*\}/g, `}{${sPart}}`); }
+
+    const kP0 = effectiveKZeroPoles(convertToBackend(polosPlanta));
+    let latexPoli = fixDenWithS(result.latex_planta_polinomial, kP0, 's') || "";
+    let latexFat  = fixDenWithS(result.latex_planta_fatorada,   kP0, 's') || "";
+    let latexParc = fixDenWithS(result.latex_planta_parcial,    kP0, 's') || "";
+    const kZeroZeros = zerosPlanta.filter(z => Math.abs(z.real) < 1e-8 && !z.useImag).length;
+    if (kZeroZeros > 0) {
+        const numPattern = /\\frac\{\s*1\s*\}/;
+        const sFactor = kZeroZeros === 1 ? 's' : `s^{${kZeroZeros}}`;
+        if (numPattern.test(latexFat))  latexFat  = latexFat.replace(numPattern, `\\frac{${sFactor}}`);
+        if (numPattern.test(latexPoli)) latexPoli = latexPoli.replace(numPattern, `\\frac{${sFactor}}`);
+    }
+    document.getElementById('latex_planta_polinomial').innerHTML = latexPoli;
+    document.getElementById('latex_planta_fatorada').innerHTML   = latexFat;
+    document.getElementById('latex_planta_parcial').innerHTML    = latexParc;
+    if (window.MathJax) MathJax.typesetPromise();
 
         Plotly.react('plot_pz', result.plot_pz_data.data, {
             ...result.plot_pz_data.layout,
@@ -451,6 +626,22 @@ if (window.MathJax) MathJax.typesetPromise();
         });
         const nyquistResult = await resNyquist.json();
         document.getElementById('nyquist-img').src = "data:image/png;base64," + nyquistResult.nyquist_img;
+
+        // Atualiza Bode (malha aberta da planta)
+        try {
+            const resBode = await fetch('/bode_pagina2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const bodeJson = await resBode.json();
+            Plotly.react('plot_bode_p2', bodeJson.bode_data.data, {
+                ...bodeJson.bode_data.layout,
+                width: 850,
+                height: 400
+            }, {responsive: false});
+        } catch (e) { console.warn('Falha ao atualizar Bode pagina2:', e); }
+
         forcePlotlyResize();
     }
 
@@ -475,6 +666,7 @@ if (window.MathJax) MathJax.typesetPromise();
         // Inicializa inputs e botões
         renderPlantaInputs();
         setupPlantaBtns();
+        setupGanhoPlanta();
         atualizar();
 
         // Menu hamburguer interativo com delay de 0.3s para fechar
@@ -528,10 +720,13 @@ if (window.MathJax) MathJax.typesetPromise();
         document.getElementById('seta-grafico-open').innerHTML = "&#x25B6;";
         document.getElementById('nyquist-img').style.display = "none";
         document.getElementById('seta-grafico-nyquist').innerHTML = "&#x25B6;";
+        document.getElementById('plot_bode_p2').style.display = "none";
+        document.getElementById('seta-grafico-bode-p2').innerHTML = "&#x25B6;";
 
         toggleSection('seta-grafico-pz', 'plot_pz');
         toggleSection('seta-grafico-open', 'plot_open');
         toggleSection('seta-grafico-nyquist', 'nyquist-img');
+        toggleSection('seta-grafico-bode-p2', 'plot_bode_p2');
 
         // Feedback modal
         document.getElementById('abrir-feedback').onclick = function() {
@@ -585,7 +780,32 @@ if (window.MathJax) MathJax.typesetPromise();
         darkModeToggle.addEventListener('change', function(event) {
             setDarkMode(event.target.checked);
         });
+        // Modal todas FTs
+        document.getElementById('btn-modal-ft-all-p2').onclick = abrirModalFtAllP2;
+        document.getElementById('fechar-modal-ft-all-p2').onclick = fecharModalFtAllP2;
+        document.getElementById('ft-modal-select-pagina2').onchange = renderModalFtPagina2;
+        window.addEventListener('click', (e)=>{ const m=document.getElementById('modal-ft-all-p2'); if(e.target===m) fecharModalFtAllP2(); });
     });
     </script>
+    <script>
+    // Ajuste de tamanho dos gráficos se o container muda
+    function forcePlotlyResize(){
+        try {
+            const ids = ['plot_pz','plot_open','plot_bode_p2'];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el.style.display !== 'none') {
+                    Plotly.Plots.resize(el);
+                }
+            });
+        } catch(e) { /* silencioso */ }
+    }
+    </script>
+    <style>
+        .ft-chip { padding:2px 10px; border-radius:14px; background:#1976d2; color:#fff; font-size:0.75em; font-weight:600; }
+        body.dark-mode .ft-chip { background:#CF1259; }
+        .ft-section-title { text-align:center; margin:20px 0 6px; font-weight:600; }
+        .ft-expr { display:block; text-align:center; font-size:1.05em; margin:4px 0; }
+    </style>
 </body>
 </html>

@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect
 import numpy as np
 import control as ctl
-import scipy.signal  # Adicione esta linha junto com os outros imports
+import scipy.signal
 import io
 import base64
 import matplotlib
@@ -12,6 +12,7 @@ from email.mime.text import MIMEText
 
 app = Flask(__name__)
 
+# Páginas
 @app.route('/')
 def home():
     return redirect('/principal')
@@ -36,353 +37,31 @@ def blocos():
 def alocacao():
     return render_template('alocacao.html')
 
-@app.route('/atualizar', methods=['POST'])
-def atualizar():
-    data = request.get_json()
-    tipo = data.get("tipo", "Caso 1")
+@app.route('/discreto')
+def pagina_discreto():
+    return render_template('discreto.html')
 
-    # Recebe os parâmetros da planta
-    p1_1 = float(data.get("p1_1", -1))
-    z_1 = float(data.get("z_1", 0))
-    p1_2 = float(data.get("p1_2", -1))
-    p2_2 = float(data.get("p2_2", -2))
-    z_2 = float(data.get("z_2", 0))
+@app.route('/pid')
+def pid_page():
+    return render_template('pid.html')
 
-    # Define a função de transferência da planta
-    if tipo == "Caso 1":
-        num = np.poly([z_1])
-        den = np.poly([p1_1])
-    elif tipo == "Caso 2":
-        num = np.poly([z_2])
-        den = np.poly([p1_2, p2_2])
-    else:
-        num = [1]
-        den = [1]
+@app.route('/state')
+def state_page():
+    return render_template('state.html')
 
-    G = ctl.tf(num, den)
+@app.route('/sinais')
+def sinais_page():
+    return render_template('sinais.html')
 
-    # Define as funções de transferência
-    latex_planta = f"\\[ G_{{planta}}(s) = \\frac{{{np.poly1d(num)}}}{{{np.poly1d(den)}}} \\]"
-    latex_controlador = "\\[ G_{{controlador}}(s) = \\frac{{s + 1}}{{s + 2}} \\]"
-    latex_open = "\\[ G_{{open}}(s) = G_{{planta}}(s) \\cdot G_{{controlador}}(s) \\]"
-    latex_closed = "\\[ G_{{closed}}(s) = \\frac{{G_{{open}}(s)}}{{1 + G_{{open}}(s)}} \\]"
-
-    # Gera os gráficos
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-
-    # Diagrama de Polos e Zeros
-    zeros = np.roots(num)
-    poles = np.roots(den)
-    axs[0].scatter(np.real(zeros), np.imag(zeros), label="Zeros", color="blue")
-    axs[0].scatter(np.real(poles), np.imag(poles), label="Polos", color="red")
-    axs[0].set_title("Diagrama de Polos e Zeros")
-    axs[0].grid(True)
-    axs[0].legend()
-
-    # Resposta ao Degrau (Malha Aberta)
-    T, yout = ctl.step_response(G)
-    axs[1].plot(T, yout)
-    axs[1].set_title("Resposta ao Degrau (Malha Aberta)")
-    axs[1].grid(True)
-
-    t_perturb = float(data.get("t_perturb", 20))
-    amp_perturb = float(data.get("amp_perturb", 0.5))
-
-    # Resposta ao degrau (sem perturbação)
-    T, yout_step = ctl.step_response(G)
-
-    # Resposta ao degrau + perturbação
-    T_long = np.linspace(0, 50, 1000)
-    u = np.ones_like(T_long)
-    u[T_long >= t_perturb] += amp_perturb
-    T_resp, yout_perturb = ctl.forced_response(G, T_long, u)
-
-    return jsonify({
-        "latex_planta": latex_planta,
-        "latex_controlador": latex_controlador,
-        "latex_open": latex_open,
-        "latex_closed": latex_closed,
-        "plot_data": {
-            "T": T_long.tolist(),
-            "yout_step": np.interp(T_long, T, yout_step).tolist(),
-            "yout_perturb": yout_perturb.tolist(),
-            "t_perturb": t_perturb,
-            "amp_perturb": amp_perturb
-        }
-    })
-
-@app.route('/atualizar_bode', methods=['POST'])
-def atualizar_bode():
-    data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [-1])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [0])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
-
-    print("polos_planta:", polos_planta)
-    print("zeros_planta:", zeros_planta)
-    print("polos_controlador:", polos_controlador)
-    print("zeros_controlador:", zeros_controlador)
-    print("ganho_controlador:", ganho_controlador)
-
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    polos_planta_filtrados = [p for p in polos_planta if abs(p) > 1e-8]
-    zeros_controlador_filtrados = [z for z in zeros_controlador if abs(z) > 1e-8]
-    polos_controlador_filtrados = [p for p in polos_controlador if abs(p) > 1e-8]
-
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
-    den_planta = np.poly(polos_planta_filtrados)
-    num_controlador = np.poly(zeros_controlador_filtrados) if zeros_controlador_filtrados else np.array([1.0])
-    num_controlador = ganho_controlador * num_controlador
-    den_controlador = np.poly(polos_controlador_filtrados)
-
-    num_open = np.polymul(num_planta, num_controlador)
-    den_open = np.polymul(den_planta, den_controlador)
-    G_open = ctl.tf(num_open, den_open)
-
-    omega = np.logspace(-2, 2, 500)  # Frequências de 0.01 a 100 rad/s
-    mag, phase, omega = ctl.bode(G_open, omega=omega, dB=True, plot=False)
-
-    bode_data = {
-        "data": [
-            {
-                "x": omega.tolist(),
-                "y": 20 * np.log10(mag).tolist(),
-                "type": "scatter",
-                "mode": "lines",
-                "name": "Magnitude"
-            },
-            {
-                "x": omega.tolist(),
-                "y": np.degrees(phase).tolist(),
-                "type": "scatter",
-                "mode": "lines",
-                "name": "Fase",
-                "yaxis": "y2"
-            }
-        ],
-        "layout": {
-            "title": "Diagrama de Bode",
-            "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
-            "yaxis": {"title": "Magnitude (dB)"},
-            "yaxis2": {
-                "title": "Fase (graus)",
-                "overlaying": "y",
-                "side": "right"
-            },
-            "legend": {"x": 0, "y": 1.1, "orientation": "h"}
-        }
-    }
-
-    return jsonify({"bode_data": bode_data})
-
-@app.route('/atualizar_nyquist', methods=['POST'])
-def atualizar_nyquist():
-    data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [-1])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [0])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
-
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    polos_planta_filtrados = [p for p in polos_planta if abs(p) > 1e-8]
-    zeros_controlador_filtrados = [z for z in zeros_controlador if abs(z) > 1e-8]
-    polos_controlador_filtrados = [p for p in polos_controlador if abs(p) > 1e-8]
-
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
-    den_planta = np.poly(polos_planta_filtrados) if polos_planta_filtrados else np.array([1.0])
-    num_controlador = np.poly(zeros_controlador_filtrados) if zeros_controlador_filtrados else np.array([1.0])
-    num_controlador = ganho_controlador * num_controlador
-    den_controlador = np.poly(polos_controlador_filtrados) if polos_controlador_filtrados else np.array([1.0])
-
-    num_open = np.polymul(num_planta, num_controlador)
-    den_open = np.polymul(den_planta, den_controlador)
-    G_open = ctl.tf(num_open, den_open)
-
-    omega = np.logspace(-2, 2, 500)
-    _, H, _ = ctl.freqresp(G_open, omega)
-    real = np.real(H[0]).tolist() if H.ndim == 3 else np.real(H).tolist()
-    imag = np.imag(H[0]).tolist() if H.ndim == 3 else np.imag(H).tolist()
-
-    nyquist_data = {
-        "data": [
-            {"x": real, "y": imag, "mode": "lines", "name": "Nyquist"},
-            {"x": real, "y": [-i for i in imag], "mode": "lines", "name": "Nyquist (espelhado)", "line": {"dash": "dash"}}
-        ],
-        "layout": {
-            "title": "Diagrama de Nyquist",
-            "xaxis": {"title": "Eixo Real"},
-            "yaxis": {"title": "Eixo Imaginário"},
-            "showlegend": True,
-            "yaxis_scaleanchor": "x",
-            "yaxis_scaleratio": 1
-        }
-    }
-    return jsonify({"nyquist_data": nyquist_data})
-
-@app.route('/atualizar_pagina4', methods=['POST'])
-def atualizar_pagina4():
-    data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [-1])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [0])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
-    ganho_planta = float(data.get("ganho_planta", 1.0))
-
-    t_perturb_fechada = float(data.get("t_perturb_fechada", 20))
-    amp_perturb_fechada = float(data.get("amp_perturb_fechada", 0.5))
-
-    # Ensure num_planta and den_planta are arrays
-    num_planta = np.array([ganho_planta]) * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-    num_controlador = np.array([ganho_controlador]) * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-
-    G_planta = ctl.tf(num_planta, den_planta)
-    G_controlador = ctl.tf(num_controlador, den_controlador)
-    G_closed = ctl.feedback(G_planta * G_controlador)
-
-    # Resposta ao degrau (Malha Aberta - apenas planta)
-    T_open, yout_open = ctl.step_response(G_planta)
-    plot_open_data = {
-        "data": [
-            {"x": T_open.tolist(), "y": yout_open.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Aberta)"}
-        ],
-        "layout": {"title": "Resposta ao Degrau (Malha Aberta)", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
-    }
-
-    # Resposta ao degrau (Malha Fechada - planta e controlador)
-    T = np.linspace(0, 50, 1000)
-    _, yout_closed = ctl.forced_response(G_closed, T, np.ones_like(T))
-    u_perturb = np.ones_like(T)
-    u_perturb[T >= t_perturb_fechada] += amp_perturb_fechada
-    _, yout_perturb = ctl.forced_response(G_closed, T, u_perturb)
-    _, yout_open_interp = ctl.forced_response(G_planta, T, np.ones_like(T))
-
-    plot_closed_data = {
-        "data": [
-            {"x": T.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Sem Perturbação"},
-            {"x": T.tolist(), "y": yout_perturb.tolist(), "mode": "lines", "name": "Com Perturbação"},
-            {"x": T.tolist(), "y": yout_open_interp.tolist(), "mode": "lines", "name": "Malha Aberta", "line": {"dash": "dash"}}
-        ],
-        "layout": {"title": "Resposta ao Degrau (Malha Fechada)", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
-    }
-
-    # LaTeX das FTs
-    latex_planta_polinomial = f"\\[ G(s) = \\frac{{{latex_poly(num_planta, 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
-    latex_planta_fatorada = f"\\[ G(s) = \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
-    latex_planta_parcial = latex_partial_fraction(num_planta, den_planta, 's')
-
-    
-
-    latex_controlador_polinomial = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_poly(np.poly(zeros_controlador) if zeros_controlador else [1.0], 's')}}}{{{latex_poly(den_controlador, 's')}}} \\]"
-    latex_controlador_fatorada = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_factored(zeros_controlador, 's')}}}{{{latex_factored(polos_controlador, 's')}}} \\]"
-    latex_controlador_parcial = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot {latex_partial_fraction(np.poly(zeros_controlador) if zeros_controlador else [1.0], den_controlador, 's')[3:-3]} \\]"
+@app.route('/raizes')
+def raizes():
+    return render_template('raizes.html')
 
 
-    return jsonify({
-        "latex_planta_polinomial": latex_planta_polinomial,
-        "latex_planta_fatorada": latex_planta_fatorada,
-        "latex_planta_parcial": latex_planta_parcial,
-        "latex_controlador_polinomial": latex_controlador_polinomial,
-        "latex_controlador_fatorada": latex_controlador_fatorada,
-        "latex_controlador_parcial": latex_controlador_parcial,
-        "plot_open_data": plot_open_data,
-        "plot_closed_data": plot_closed_data
-    })
-
-@app.route('/atualizar_pz_closed', methods=['POST'])
-def atualizar_pz_closed():
-    data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [-1])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [0])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
-    tipo = data.get("tipo", "malha_fechada")  # Recebe o tipo do frontend
-
-    # Funções de transferência
-    num_planta = np.poly(zeros_planta) if zeros_planta else np.array([1.0])
-    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-
-    if tipo == "planta":
-        # Apenas planta
-        zeros = np.roots(num_planta)
-        polos = np.roots(den_planta)
-        titulo = "Diagrama de Polos e Zeros da Planta"
-    elif tipo == "controlador":
-        # Apenas controlador
-        zeros = np.roots(num_controlador)
-        polos = np.roots(den_controlador)
-        titulo = "Diagrama de Polos e Zeros do Controlador"
-    elif tipo == "malha_aberta":
-        # Malha aberta: G(s)*Gc(s)
-        num_open = np.polymul(num_planta, num_controlador)
-        den_open = np.polymul(den_planta, den_controlador)
-        zeros = np.roots(num_open)
-        polos = np.roots(den_open)
-        titulo = "Diagrama de Polos e Zeros (Malha Aberta)"
-    else:
-        # Malha fechada
-        G_planta = ctl.tf(num_planta, den_planta)
-        G_controlador = ctl.tf(num_controlador, den_controlador)
-        G_closed = ctl.feedback(G_planta * G_controlador)
-        num_closed = np.array(G_closed.num).flatten()
-        den_closed = np.array(G_closed.den).flatten()
-        zeros = np.roots(num_closed)
-        polos = np.roots(den_closed)
-        titulo = "Diagrama de Polos e Zeros (Malha Fechada)"
-
-    plot_pz_closed = {
-        "data": [
-            {"x": np.real(zeros).tolist(), "y": np.imag(zeros).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
-            {"x": np.real(polos).tolist(), "y": np.imag(polos).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
-        ],
-        "layout": {
-            "title": titulo,
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
-    }
-
-    return jsonify({"plot_pz_closed": plot_pz_closed})
-
-
-@app.route('/enviar_feedback', methods=['POST'])
-def enviar_feedback():
-    data = request.get_json()
-    texto = data.get('feedback', '')
-    # Configurações do seu e-mail
-    remetente = 'syscoufsc@gmail.com'
-    senha = 'jvey wybi xcnm znko'  # Use senha de app para Gmail
-    destinatario = 'syscoufsc@gmail.com'  # Ou outro e-mail de destino
-
-    msg = MIMEText(texto)
-    msg['Subject'] = 'Feedback do Simulador'
-    msg['From'] = remetente
-    msg['To'] = destinatario
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(remetente, senha)
-            server.sendmail(remetente, destinatario, msg.as_string())
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        print("Erro ao enviar feedback:", e)
-        return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
-
+# Helpers LaTeX
 def latex_poly(coeffs, var='s'):
     coeffs = np.array(coeffs, dtype=float)
-    # Remove zeros à direita (constante no início)
     coeffs = np.trim_zeros(coeffs, 'f')
-    # Se todos os zeros são zero, o numerador vira [1, 0, 0, ...]
-    # Queremos mostrar "1" se todos os coeficientes, exceto o primeiro, são zero
     if len(coeffs) > 1 and np.allclose(coeffs[1:], 0) and np.isclose(coeffs[0], 1):
         return "1"
     if len(coeffs) == 1 and np.isclose(coeffs[0], 1):
@@ -409,105 +88,238 @@ def latex_monic(coeffs, var='s'):
     return latex_poly(norm, var)
 
 def latex_factored(roots, var='s'):
-    if len(roots) == 0 or np.allclose(roots, 0):
+    roots = np.array(roots, dtype=complex).flatten()
+    if roots.size == 0 or np.allclose(roots, 0):
         return "1"
     termos = []
     for r in roots:
-        if abs(r) < 1e-10:
+        a = float(np.real(r))
+        b = float(np.imag(r))
+        if abs(a) < 1e-10 and abs(b) < 1e-10:
             termos.append(f"{var}")
+        elif abs(b) < 1e-10:
+            sinal = "-" if a >= 0 else "+"
+            valor = abs(a)
+            termos.append(f"({var} {sinal} {valor:.3g})")
         else:
-            # Exibe (s - r) para qualquer valor de r (positivo ou negativo)
-            sinal = "-" if r >= 0 else "+"
-            valor = abs(r)
-            if valor < 1e-10:
-                termos.append(f"{var}")
-            else:
-                termos.append(f"({var} {sinal} {valor:.3g})")
+            sinal_im = "+" if b >= 0 else "-"
+            termos.append(f"({var} - ({a:.3g} {sinal_im} {abs(b):.3g}j))")
     return "".join(termos)
 
 def latex_partial_fraction(num, den, var='s'):
-    """
-    Gera a representação LaTeX da decomposição em frações parciais.
-    """
-    import scipy.signal
-    import numpy as np
+    """Gera LaTeX para a expansão em frações parciais no formato padrão
+    A_i/(s - p_i)^m + (parte polinomial), garantindo os sinais corretos.
 
-    # Remove zeros desnecessários no numerador e denominador
+    Regras importantes de formatação:
+    - Para polos reais p: usa-se (s - p). Se p < 0, vira (s + |p|).
+    - Para p ≈ 0: usa-se simplesmente s (ou s^m para multiplicidades).
+    - Para polos complexos p = a ± jb: usa-se (s - (a ± jb)).
+    - Resíduos e coeficientes polinomiais podem ser complexos; são formatados como (a ± bj).
+    """
+    def complex_to_latex(c: complex) -> str:
+        c = complex(c)
+        a = float(np.real(c))
+        b = float(np.imag(c))
+        if abs(b) < 1e-10:
+            return f"{a:.4g}"
+        sign = "+" if b >= 0 else "-"
+        return f"({a:.4g} {sign} {abs(b):.4g}j)"
+
     num = np.trim_zeros(num, 'f')
     den = np.trim_zeros(den, 'f')
-
-    # Verifica se o numerador ou denominador é vazio
     if len(num) == 0 or len(den) == 0:
         return "\\[ 0 \\]"
-
     try:
-        # Calcula os resíduos, polos e termos constantes
         r, p, k = scipy.signal.residue(num, den)
 
-        # Organiza os polos e resíduos em um dicionário para tratar polos repetidos
+        # Agrupa por polo (com tolerância), preservando multiplicidades
         termos = {}
         for ri, pi in zip(r, p):
-            pi = np.round(pi, 4)  # Arredonda o polo
-            if pi not in termos:
-                termos[pi] = []
-            termos[pi].append(ri)  # Adiciona o resíduo ao polo correspondente
+            a = float(np.real(pi))
+            b = float(np.imag(pi))
+            key = complex(np.round(a, 4), np.round(b, 4))
+            termos.setdefault(key, []).append(ri)
 
-        # Gera os termos da fração parcial
         latex_termos = []
         for pi, residuos in termos.items():
+            a = float(np.real(pi))
+            b = float(np.imag(pi))
             for i, ri in enumerate(residuos):
-                ri = np.round(ri, 4)  # Arredonda o resíduo
-                if abs(ri) > 1e-8:  # Ignora resíduos nulos
-                    expoente = i + 1
-                    sinal = "+" if pi >= 0 else "-"
-                    valor = abs(pi)
-                    if expoente == 1:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{{var} {sinal} {valor:.4g}}}")
+                if abs(ri) <= 1e-8:
+                    continue
+                expoente = i + 1  # i=0 -> primeira ordem, i=1 -> segunda, etc.
+
+                # Base do denominador (s - p)
+                if abs(b) < 1e-12:  # polo real
+                    if abs(a) < 1e-12:
+                        base = f"{var}"
                     else:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{({var} {sinal} {valor:.4g})^{expoente}}}")
+                        sinal = "-" if a >= 0 else "+"
+                        base = f"{var} {sinal} {abs(a):.4g}"
+                else:  # polo complexo
+                    sinal_im = "+" if b >= 0 else "-"
+                    base = f"{var} - ({a:.4g} {sinal_im} {abs(b):.4g}j)"
 
-        # Adiciona os termos constantes, se existirem
+                ri_str = complex_to_latex(ri)
+                if expoente == 1:
+                    latex_termos.append(f"\\frac{{{ri_str}}}{{{base}}}")
+                else:
+                    latex_termos.append(f"\\frac{{{ri_str}}}{{({base})^{expoente}}}")
+
+        # Parte polinomial (se existir)
         if k is not None and len(k) > 0:
+            deg = len(k) - 1
             for i, ki in enumerate(k):
-                if abs(ki) > 1e-8:  # Ignora termos constantes nulos
-                    latex_termos.append(f"{ki:.4g}{var}^{len(k)-i-1}" if i < len(k) - 1 else f"{ki:.4g}")
+                if abs(ki) <= 1e-8:
+                    continue
+                ki_str = complex_to_latex(ki)
+                pow_ = deg - i
+                if pow_ > 1:
+                    latex_termos.append(f"{ki_str}{var}^{pow_}")
+                elif pow_ == 1:
+                    latex_termos.append(f"{ki_str}{var}")
+                else:
+                    latex_termos.append(f"{ki_str}")
 
-        # Retorna a expressão LaTeX
         return "\\[ " + " + ".join(latex_termos) + " \\]" if latex_termos else "\\[ 0 \\]"
     except Exception as e:
-        return f"\\[ \\text{{Erro ao calcular frações parciais: {e}}} \\]"
+        return f"\\[ \\text{{Erro ao calcular frações parciais: {e}}} \\ ]"
 
 
-@app.route('/nyquist_pagina2', methods=['POST'])
-def nyquist_pagina2():
+# Endpoints — Malha aberta simples com perturbação na entrada
+@app.route('/atualizar', methods=['POST'])
+def atualizar():
+    data = request.get_json()
+    tipo = data.get("tipo", "Caso 1")
+
+    p1_1 = float(data.get("p1_1", -1))
+    z_1 = float(data.get("z_1", 0))
+    p1_2 = float(data.get("p1_2", -1))
+    p2_2 = float(data.get("p2_2", -2))
+    z_2 = float(data.get("z_2", 0))
+
+    if tipo == "Caso 1":
+        num = np.poly([z_1])
+        den = np.poly([p1_1])
+    elif tipo == "Caso 2":
+        num = np.poly([z_2])
+        den = np.poly([p1_2, p2_2])
+    else:
+        num = [1]
+        den = [1]
+
+    G = ctl.tf(num, den)
+
+    latex_planta = f"\\[ G_{{planta}}(s) = \\frac{{{np.poly1d(num)}}}{{{np.poly1d(den)}}} \\]"
+    latex_controlador = "\\[ G_{{controlador}}(s) = \\frac{{s + 1}}{{s + 2}} \\]"
+    latex_open = "\\[ G_{{open}}(s) = G_{{planta}}(s) \\cdot G_{{controlador}}(s) \\]"
+    latex_closed = "\\[ G_{{closed}}(s) = \\frac{{G_{{open}}(s)}}{{1 + G_{{open}}(s)}} \\]"
+
+    # Resposta ao degrau usando scipy.signal.step
+    system = (np.array(G.num[0][0]), np.array(G.den[0][0]))
+    T, yout_step = scipy.signal.step(system, T=np.linspace(0, 50, 1000))
+    T_long = np.linspace(0, 50, 1000)
+    t_perturb = float(data.get("t_perturb", 20))
+    amp_perturb = float(data.get("amp_perturb", 0.5))
+    u = np.ones_like(T_long)
+    u[T_long >= t_perturb] += amp_perturb
+    _, yout_perturb = safe_forced_response(G, T_long, u)
+
+    return jsonify({
+        "latex_planta": latex_planta,
+        "latex_controlador": latex_controlador,
+        "latex_open": latex_open,
+        "latex_closed": latex_closed,
+        "plot_data": {
+            "T": T_long.tolist(),
+            "yout_step": np.interp(T_long, T, yout_step).tolist(),
+            "yout_perturb": yout_perturb.tolist(),
+            "t_perturb": t_perturb,
+            "amp_perturb": amp_perturb
+        }
+    })
+
+
+# Bode e Nyquist
+@app.route('/atualizar_bode', methods=['POST'])
+def atualizar_bode():
+    data = request.get_json()
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", [-1]))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", [0]))
+    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    ganho_planta = float(data.get("ganho_planta", 1.0))
+
+    # NÃO remover polos/zeros em 0: integrores e zeros na origem são reais
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+
+    # Malha fechada Y/R por padrão nesta rota (página 4)
+    L = ctl.tf(np.polymul(num_controlador, num_planta), np.polymul(den_controlador, den_planta))
+    try:
+        L = ctl.minreal(L, verbose=False)
+    except Exception:
+        pass
+    G_closed = ctl.feedback(L)
+    try:
+        G_closed = ctl.minreal(G_closed, verbose=False)
+    except Exception:
+        pass
+
+    omega = np.logspace(-2, 2, 500)
+    mag, phase, omega = ctl.bode(G_closed, omega=omega, dB=False, plot=False)
+
+    bode_data = {
+        "data": [
+            {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude (Y/R)"},
+            {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase (Y/R)", "yaxis": "y2"}
+        ],
+        "layout": {
+            "title": "Diagrama de Bode (Malha Fechada Y/R)",
+            "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
+            "yaxis": {"title": "Magnitude (dB)"},
+            "yaxis2": {"title": "Fase (graus)", "overlaying": "y", "side": "right"},
+            "legend": {"x": 0, "y": 1.1, "orientation": "h"}
+        }
+    }
+    return jsonify({"bode_data": bode_data})
+
+@app.route('/bode_pagina2', methods=['POST'])
+def bode_pagina2():
     data = request.get_json()
     polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
     zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
-
-    # Filtrar zeros e polos
-    zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
-    den_planta = np.poly(polos_planta)
-
-    # Definir G_planta
+    ganho_planta = float(data.get("ganho_planta", 1.0))
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
     G_planta = ctl.tf(num_planta, den_planta)
+    try:
+        G_planta = ctl.minreal(G_planta, verbose=False)
+    except Exception:
+        pass
 
-    # Gerar o diagrama de Nyquist
-    fig, ax = plt.subplots(figsize=(7, 4))  # Apenas aumenta o tamanho, não altera escala
-    ctl.nyquist_plot(G_planta, omega=np.logspace(-2, 2, 500), ax=ax, color='b')
-    ax.set_title("Diagrama de Nyquist")
-    ax.set_xlabel("Re")
-    ax.set_ylabel("Im")
-    ax.grid(True)
-    plt.tight_layout()
+    omega = np.logspace(-2, 2, 500)
+    mag, phase, omega = ctl.bode(G_planta, omega=omega, dB=False, plot=False)
 
-    # Salvar o gráfico como imagem base64
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-    return jsonify({"nyquist_img": img_base64})
+    bode_data = {
+        "data": [
+            {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude (G)"},
+            {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase (G)", "yaxis": "y2"}
+        ],
+        "layout": {
+            "title": "Diagrama de Bode (Malha Aberta - Planta)",
+            "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
+            "yaxis": {"title": "Magnitude (dB)"},
+            "yaxis2": {"title": "Fase (graus)", "overlaying": "y", "side": "right"},
+            "legend": {"x": 0, "y": 1.1, "orientation": "h"}
+        }
+    }
+    return jsonify({"bode_data": bode_data})
 
 @app.route('/nyquist_pagina4', methods=['POST'])
 def nyquist_pagina4():
@@ -529,16 +341,19 @@ def nyquist_pagina4():
     num_controlador = ganho_controlador * num_controlador
     den_controlador = np.poly(polos_controlador_filtrados) if polos_controlador_filtrados else np.array([1.0])
 
-    # Definir G_open corretamente
-    G_open = ctl.tf(np.polymul(num_planta, num_controlador), np.polymul(den_planta, den_controlador))
 
-    fig, ax = plt.subplots(figsize=(7, 4))  # Apenas aumenta o tamanho, não altera escala
+    G_open = ctl.tf(np.polymul(num_planta, num_controlador), np.polymul(den_planta, den_controlador))
+    try:
+        G_open = ctl.minreal(G_open, verbose=False)
+    except Exception:
+        pass
+
+    fig, ax = plt.subplots(figsize=(7, 4))
     ctl.nyquist_plot(G_open, omega=np.logspace(-2, 2, 500), ax=ax, color='b')
     ax.set_title("Diagrama de Nyquist")
     ax.set_xlabel("Re")
     ax.set_ylabel("Im")
     ax.grid(True)
-    # Remova os set_xlim/set_ylim para manter a escala automática
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -548,18 +363,464 @@ def nyquist_pagina4():
     img_base64 = base64.b64encode(buf.read()).decode('utf-8')
     return jsonify({"nyquist_img": img_base64})
 
+def parse_polos_zeros(arr):
+    # Converte [real, imag] para complex, senão float
+    result = []
+    for p in arr:
+        if isinstance(p, list) and len(p) == 2:
+            result.append(complex(p[0], p[1]))
+        else:
+            result.append(float(p))
+    return result
+
+# Resposta segura: lida com sistemas estáticos, shapes e diferentes retornos do python-control
+def safe_forced_response(sys, T, U):
+    T = np.asarray(T, dtype=float).reshape(-1)
+    U = np.asarray(U, dtype=float).reshape(-1)
+    if U.shape[0] != T.shape[0]:
+        # Ajusta U para mesmo tamanho de T (degrau unitário por padrão)
+        U = np.ones_like(T, dtype=float) * (U[0] if U.size else 1.0)
+
+    # Trata sistema SISO estático (ganho puro) sem estados
+    try:
+        num, den = ctl.tfdata(sys)  # pode retornar listas aninhadas
+        num = np.array(num).squeeze()
+        den = np.array(den).squeeze()
+        # SISO estático: num e den de tamanho 1
+        if num.ndim == 1 and den.ndim == 1 and num.size == 1 and den.size == 1:
+            gain = float(num[0]) / float(den[0])
+            return T, gain * U
+    except Exception:
+        pass
+
+    # Tenta forced_response e normaliza diferentes formatos de retorno
+    try:
+        res = ctl.forced_response(sys, T, U)
+        # Versões antigas retornam tupla (T, y[, x])
+        if isinstance(res, (tuple, list)):
+            if len(res) >= 2:
+                t = np.asarray(res[0]).reshape(-1)
+                y = np.asarray(res[1])
+                y = np.squeeze(y)
+                if y.ndim == 2:
+                    # Seleciona primeiro canal (SISO)
+                    y = y[0, :]
+                if y.shape[0] != t.shape[0] and y.shape[-1] == t.shape[0]:
+                    y = y.T
+                return t, y.reshape(-1)
+        # Versões novas retornam objeto TimeResponseData
+        t = getattr(res, 'time', None)
+        y = getattr(res, 'outputs', None)
+        if t is None:
+            t = getattr(res, 't', None)
+        if y is None:
+            y = getattr(res, 'y', None) or getattr(res, 'yout', None)
+        if t is not None and y is not None:
+            t = np.asarray(t).reshape(-1)
+            y = np.asarray(y)
+            y = np.squeeze(y)
+            if y.ndim == 2:
+                y = y[0, :]
+            if y.shape[0] != t.shape[0] and y.shape[-1] == t.shape[0]:
+                y = y.T
+            # Se ainda não casar, forçamos shape seguro para evitar exceção
+            if y.shape[0] != t.shape[0]:
+                y = np.resize(y, t.shape[0])
+            return t, y.reshape(-1)
+    except Exception:
+        pass
+
+    # Fallback final via lsim
+    try:
+        tout, yout, _ = ctl.lsim(sys, U=U, T=T)
+        return np.asarray(tout).reshape(-1), np.squeeze(np.asarray(yout)).reshape(-1)
+    except Exception:
+        # Último recurso: zeros para manter a página responsiva
+        return T, np.zeros_like(T)
+# Página 4 — Malha fechada (sem filtro) + overlays + LaTeX
+@app.route('/atualizar_pagina4', methods=['POST'])
+def atualizar_pagina4():
+    data = request.get_json()
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", [0]))
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", [-1]))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", [0]))
+    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    ganho_planta = float(data.get("ganho_planta", 1.0))  # <-- NOVO
+
+    t_perturb_fechada = float(data.get("t_perturb_fechada", 20))
+    amp_perturb_fechada = float(data.get("amp_perturb_fechada", 0.5))
+
+    filtro_ativo = bool(data.get("filtro_ativo", False))
+    polos_filtro = [float(p) for p in data.get("polos_filtro", [])]
+    ganho_filtro = float(data.get("ganho_filtro", 1.0))
+
+    # Monta G(s), C(s) usando ganho da planta
+    Np = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    Dp = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    Nc = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    Dc = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+
+    G_planta = ctl.tf(Np, Dp)
+    G_controlador = ctl.tf(Nc, Dc)
+
+    # Malha fechada Y/R
+    L = G_controlador * G_planta
+    G_closed = ctl.feedback(L)
+
+    # Respostas
+    T = np.linspace(0, 50, 1000, dtype=float)
+    T, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
+
+    u_ref = np.ones_like(T, dtype=float)
+    u_ref[T >= t_perturb_fechada] += amp_perturb_fechada
+    _, yout_closed_ref2 = safe_forced_response(G_closed, T, u_ref)
+
+    _, yout_open = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
+
+    plot_closed_data = {
+        "data": [
+            {"x": T.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Sem Perturbação", "line": {"color": "#077FFF", "width": 3}},
+            {"x": T.tolist(), "y": yout_closed_ref2.tolist(), "mode": "lines", "name": "Com Perturbação", "line": {"color": "#ff9800", "dash": "dash", "width": 2}},
+            {"x": T.tolist(), "y": yout_open.tolist(), "mode": "lines", "name": "Malha Aberta", "line": {"color": "#06B900", "dash": "dash", "width": 3}}
+        ],
+        "layout": {"title": "Resposta ao Degrau", "xaxis": {"title": "Tempo (s)", "range": [0, 15]}, "yaxis": {"title": "Amplitude"}}
+    }
+
+    # S(s) e Y/Q
+    S = ctl.feedback(ctl.tf([1.0], [1.0]), L)  # E/R = 1/(1+L)
+    Tq = ctl.feedback(G_planta, G_controlador)  # Y/Q = G/(1+CG)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
+    error_closed_data = {"data": [{"x": T.tolist(), "y": e_step.tolist(), "mode": "lines", "name": "E/R", "line": {"color": "#000000", "dash": "solid", "width": 2}}]}
+    perturb_closed_data = {"data": [{"x": T.tolist(), "y": yq_step.tolist(), "mode": "lines", "name": "Y/Q", "line": {"dash": "dash", "color": "#9c27b0"}}]}
+
+    # LaTeX planta/controlador (3 formas)
+    Kp_str = "" if np.isclose(ganho_planta, 1.0, atol=1e-12) else f"{ganho_planta:.3g} \\cdot "
+    latex_planta_polinomial = f"\\[ G(s) = {Kp_str}\\frac{{{latex_poly(np.poly(zeros_planta) if zeros_planta else [1.0], 's')}}}{{{latex_poly(Dp, 's')}}} \\]"
+    latex_planta_fatorada   = f"\\[ G(s) = {Kp_str}\\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
+    latex_planta_parcial    = latex_partial_fraction(Np, Dp, 's')
+
+    latex_controlador_polinomial = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_poly(np.poly(zeros_controlador) if zeros_controlador else [1.0], 's')}}}{{{latex_poly(Dc, 's')}}} \\]"
+    latex_controlador_fatorada   = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_factored(zeros_controlador, 's')}}}{{{latex_factored(polos_controlador, 's')}}} \\]"
+    latex_controlador_parcial    = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot {latex_partial_fraction(np.poly(zeros_controlador) if zeros_controlador else [1.0], Dc, 's')[3:-3]} \\]"
+
+    # NOVO: Filtro (pós-saída)
+    if filtro_ativo and polos_filtro:
+        num_filtro = [ganho_filtro]
+        den_filtro = np.poly(polos_filtro)
+        F = ctl.tf(num_filtro, den_filtro)
+    else:
+        F = ctl.tf([1.0], [1.0])
+
+    Y_filt = F * G_closed
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
+    plot_closed_filt = {
+        "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado", "line": {"width": 3}}],
+        "layout": {"title": "Resposta ao Degrau (Malha Fechada + Filtro)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
+    }
+
+    # Strings LaTeX fatoradas das FTs do modal (opcional para uso futuro)
+    Nl = np.polymul(Nc, Np)      # numerador de L(s)
+    Dl = np.polymul(Dc, Dp)      # denominador de L(s)
+    Dcl = np.polyadd(Dl, Nl)     # denominador de (1 + L)
+    latex_resp_aberta = f"\\( G(s) = {latex_frac_factored_from_coeffs(Np, Dp, 's')} \\)"
+    latex_resp_fechada = f"\\( \\frac{{Y(s)}}{{R(s)}} = {latex_frac_factored_from_coeffs(Nl, Dcl, 's')} \\)"
+    latex_resp_erro    = f"\\( \\frac{{E(s)}}{{R(s)}} = {latex_frac_factored_from_coeffs(Dl, Dcl, 's')} \\)"
+    latex_resp_perturbacao = f"\\( \\frac{{Y(s)}}{{Q(s)}} = {latex_frac_factored_from_coeffs(np.polymul(Dc, Np), Dcl, 's')} \\)"
+
+    return jsonify({
+        "latex_planta_polinomial": latex_planta_polinomial,
+        "latex_planta_fatorada":   latex_planta_fatorada,
+        "latex_planta_parcial":    latex_planta_parcial,
+        "latex_controlador_polinomial": latex_controlador_polinomial,
+        "latex_controlador_fatorada":   latex_controlador_fatorada,
+        "latex_controlador_parcial":    latex_controlador_parcial,
+        "plot_closed_data": plot_closed_data,
+        "error_closed_data": error_closed_data,
+        "perturb_closed_data": perturb_closed_data,
+        "plot_closed_filt": plot_closed_filt,
+        "latex_resp_aberta": latex_resp_aberta,
+        "latex_resp_fechada": latex_resp_fechada,
+        "latex_resp_erro": latex_resp_erro,
+        "latex_resp_perturbacao": latex_resp_perturbacao
+    })
+
+# PZ para diferentes seleções (malha aberta/fechada/erro/perturbação)
+@app.route('/atualizar_pz_closed', methods=['POST'])
+def atualizar_pz_closed():
+    data = request.get_json(force=True)
+    tipo = data.get("tipo", "malha_fechada")
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", []))
+    ganho_planta = float(data.get("ganho_planta", 1.0))
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", []))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", []))
+    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+
+    # Filtro
+    filtro_ativo = bool(data.get("filtro_ativo", False))
+    polos_filtro = [float(p) for p in data.get("polos_filtro", [])]
+    ganho_filtro = float(data.get("ganho_filtro", 1.0))
+
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+
+    G_planta = ctl.tf(num_planta, den_planta)
+    G_controlador = ctl.tf(num_controlador, den_controlador)
+    L = G_controlador * G_planta
+
+    # Filtro transfer function
+    if filtro_ativo and polos_filtro:
+        num_filtro = [ganho_filtro]
+        den_filtro = np.poly(polos_filtro)
+        F = ctl.tf(num_filtro, den_filtro)
+    else:
+        F = ctl.tf([1.0], [1.0])
+
+    # Seleção do sistema para DPz
+    if tipo == "malha_aberta":
+        G_sel = G_planta
+        titulo = "Diagrama de Polos e Zeros (Malha Aberta - Planta)"
+    elif tipo == "erro":
+        G_sel = ctl.feedback(ctl.tf([1.0], [1.0]), L)
+        titulo = "Diagrama de Polos e Zeros do Erro (E/R)"
+    elif tipo == "perturbacao":
+        G_sel = ctl.feedback(G_planta, G_controlador)
+        titulo = "Diagrama de Polos e Zeros da Perturbação (Y/Q)"
+    else:  # malha_fechada
+        G_closed = ctl.feedback(L)
+        G_sel = F * G_closed  # filtro interfere em Y/R
+        titulo = "Diagrama de Polos e Zeros (Malha Fechada Y/R)"
+
+    # Coeficientes, polos e zeros da seleção
+    num = np.array(G_sel.num).flatten()
+    den = np.array(G_sel.den).flatten()
+
+    def _sanitize_roots(roots, tol=1e-2):
+        roots = np.array(roots, dtype=complex).flatten()
+        out = []
+        for z in roots:
+            re = float(np.real(z))
+            im = float(np.imag(z))
+            if abs(im) < tol:
+                im = 0.0
+            out.append(complex(re, im))
+        return np.array(out, dtype=complex)
+
+    zeros = _sanitize_roots(np.roots(num) if num.size else np.array([]))
+    polos = _sanitize_roots(np.roots(den) if den.size else np.array([]))
+
+    # LaTeX da FT selecionada (já com filtro se aplicável)
+    latex_ft_sel = f"\\( {latex_frac_factored_from_coeffs(num, den, 's')} \\)"
+    try:
+        latex_ft_parcial = latex_partial_fraction(num, den, 's')
+    except Exception:
+        latex_ft_parcial = "\\[ \\text{Erro ao gerar fração parcial} \\]"
+
+    plot_pz_closed = {
+        "data": [
+            {"x": np.real(zeros).tolist(), "y": np.imag(zeros).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
+            {"x": np.real(polos).tolist(), "y": np.imag(polos).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
+        ],
+        "layout": {"title": titulo, "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
+    }
+
+    # --- NOVO: gerar mapa completo de FTs para o modal independente do DPZ ---
+    def _latex_for_system(G):
+        n_ = np.array(G.num).flatten()
+        d_ = np.array(G.den).flatten()
+        fatorada_ = f"\\( {latex_frac_factored_from_coeffs(n_, d_, 's')} \\)"
+        try:
+            parcial_ = latex_partial_fraction(n_, d_, 's')
+        except Exception:
+            parcial_ = "\\[ \\text{Erro ao gerar fração parcial} \\]"
+        # Tempo (Resposta ao DEGRAU): usar frações parciais de G(s)/s
+        # Y(s) frente a degrau unitário = G(s)/s  => y(t) = L^{-1}{G(s)/s}
+        try:
+            # Convolui denominador com [1,0] para adicionar fator s
+            den_step = np.convolve(d_, [1.0, 0.0])
+            # Obtém resíduos usando scipy.signal.residue
+            r_step, p_step, k_step = scipy.signal.residue(n_, den_step)
+
+            # Agrupa pares conjugados para gerar forma real com cos/sin
+            usados = set()
+            termos_real = []
+            const_term = 0.0
+
+            for idx, (ri, pi) in enumerate(zip(r_step, p_step)):
+                # Polo ~ 0 => termo constante (A/s -> A)
+                if abs(np.real(pi)) < 1e-12 and abs(np.imag(pi)) < 1e-12:
+                    const_term += np.real(ri)  # ri deve ser real para polo exato em 0
+                    continue
+                # Ignora se já combinado em par complexo
+                if idx in usados:
+                    continue
+                a = float(np.real(pi))
+                b = float(np.imag(pi))
+                A = float(np.real(ri))
+                B = float(np.imag(ri))
+                if abs(b) < 1e-12:  # polo real
+                    # Termo: A e^{a t}
+                    if abs(A) > 1e-12 or abs(B) > 1e-12:
+                        coef = complex(A, B)
+                        # Se coef quase real, mostra só parte real
+                        if abs(np.imag(coef)) < 1e-10:
+                            termos_real.append(f"{np.real(coef):.4g} e^{{{a:.4g} t}}")
+                        else:
+                            # Raro (resíduo complexo para polo real) => mostra complexo
+                            sgn = '+' if np.imag(coef) >= 0 else '−'
+                            termos_real.append(f"({np.real(coef):.4g} {sgn} {abs(np.imag(coef)):.4g}j) e^{{{a:.4g} t}}")
+                else:  # polo complexo => buscar conjugado
+                    # Procura índice do conjugado
+                    found_conj = None
+                    for j in range(idx+1, len(p_step)):
+                        if j in usados:
+                            continue
+                        pj = p_step[j]
+                        if abs(np.real(pj) - a) < 1e-12 and abs(np.imag(pj) + b) < 1e-12:
+                            found_conj = j
+                            break
+                    if found_conj is not None:
+                        usados.add(found_conj)
+                        # Combinação: r e^{(a+jb)t} + r* e^{(a-jb)t} = 2 e^{a t} [A cos(bt) - B sin(bt)]
+                        termo_cos = 2*A
+                        termo_sin = -2*B
+                        # Monta expressão: e^{a t}(C cos(b t) + D sin(b t))
+                        # Simplifica sinais
+                        parte = []
+                        if abs(termo_cos) > 1e-12:
+                            parte.append(f"{termo_cos:.4g} \\cos({abs(b):.4g} t)")
+                        if abs(termo_sin) > 1e-12:
+                            sinal = ''
+                            # termo_sin já tem sinal dentro do valor
+                            parte.append(f"{termo_sin:.4g} \\sin({abs(b):.4g} t)")
+                        if len(parte) == 0:
+                            # Caso extremo todos coeficientes nulos
+                            continue
+                        parte_str = ' '.join(parte).replace('+ -', '- ')  # ajuste estetico
+                        if abs(a) > 1e-12:
+                            termos_real.append(f"e^{{{a:.4g} t}} ( {parte_str} )")
+                        else:
+                            termos_real.append(f"{parte_str}")
+                    else:
+                        # Sem conjugado (numérico) => mostra bruto
+                        termos_real.append(f"({A:.4g}{'+' if B>=0 else '−'}{abs(B):.4g}j) e^{{{a:.4g}{'+' if b>=0 else '−'}{abs(b):.4g}j t}}")
+
+            # Adiciona parte polinomial k_step (termo constante adicional)
+            if k_step is not None and len(k_step) > 0:
+                # k_step é vetor de coeficientes de polinômio em s (descendente); para passo normalmente só constante
+                # Somamos todos que representam contribuição estática
+                for ki in k_step:
+                    if abs(ki) > 1e-12 and abs(np.imag(ki)) < 1e-12:
+                        const_term += float(np.real(ki))
+
+            # Constrói expressão LaTeX
+            termos_latex = []
+            if abs(const_term) > 1e-12:
+                termos_latex.append(f"{const_term:.4g}")
+            termos_latex.extend(termos_real)
+            if len(termos_latex) == 0:
+                tempo_ = "\\[ Y(t) = 0 \\]"
+            else:
+                expr = ' + '.join(termos_latex).replace('+ -', '- ').replace('  ', ' ')
+                expr = expr.replace('--', '+')
+                tempo_ = f"\\[ Y(t) = {expr} \\]"
+        except Exception:
+            tempo_ = "\\[ Y(t) = \\text{indisponível} \\]"
+        return {"fatorada": fatorada_, "parcial": parcial_, "tempo": tempo_}
+
+    G_closed_all = ctl.feedback(L)                # Y/R base
+    G_closed_filt_all = F * G_closed_all           # Y/R com filtro
+    G_open_all = G_planta                          # Malha Aberta
+    G_error_all = ctl.feedback(ctl.tf([1.0],[1.0]), L)  # E/R
+    G_pert_all = ctl.feedback(G_planta, G_controlador)  # Y/Q
+
+    fts_map = {
+        "malha_fechada": _latex_for_system(G_closed_filt_all),  # já inclui filtro se ativo
+        "malha_aberta": _latex_for_system(G_open_all),
+        "erro": _latex_for_system(G_error_all),
+        "perturbacao": _latex_for_system(G_pert_all)
+    }
+
+    return jsonify({
+        "plot_pz_closed": plot_pz_closed,
+        "den_cl": den.tolist(),
+        "poles_cl": [{"re": float(np.real(p)), "im": float(np.imag(p))} for p in polos],
+        "latex_ft_sel": latex_ft_sel,
+        "latex_ft_parcial": latex_ft_parcial,
+        "fts": fts_map
+    })
+
+
+# Feedback por e-mail
+@app.route('/enviar_feedback', methods=['POST'])
+def enviar_feedback():
+    data = request.get_json()
+    texto = data.get('feedback', '')
+    remetente = 'syscoufsc@gmail.com'
+    senha = 'jvey wybi xcnm znko'
+    destinatario = 'syscoufsc@gmail.com'
+
+    msg = MIMEText(texto)
+    msg['Subject'] = 'Feedback do Simulador'
+    msg['From'] = remetente
+    msg['To'] = destinatario
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(remetente, senha)
+            server.sendmail(remetente, destinatario, msg.as_string())
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        print("Erro ao enviar feedback:", e)
+        return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
+
+
+# Nyquist imagens (página 2 e 4)
+@app.route('/nyquist_pagina2', methods=['POST'])
+def nyquist_pagina2():
+    data = request.get_json()
+    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
+    zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    ganho_planta = float(data.get("ganho_planta", 1.0))
+
+    # Preservar zeros em 0 (s) na planta
+    num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_planta = np.poly(polos_planta)
+    G_planta = ctl.tf(num_planta, den_planta)
+    try:
+        G_planta = ctl.minreal(G_planta, verbose=False)
+    except Exception:
+        pass
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ctl.nyquist_plot(G_planta, omega=np.logspace(-2, 2, 500), ax=ax, color='b')
+    ax.set_title("Diagrama de Nyquist")
+    ax.set_xlabel("Re")
+    ax.set_ylabel("Im")
+    ax.grid(True)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    return jsonify({"nyquist_img": img_base64})
+
+
+# Outras utilidades
 @app.route('/simular_saida', methods=['POST'])
 def simular_saida():
     data = request.get_json()
-    num = data.get("num", [1])
-    den = data.get("den", [1, 1])
+    num = [float(x) for x in data.get("num", [1])]
+    den = [float(x) for x in data.get("den", [1, 1])]
     t_final = float(data.get("t_final", 40))
     n_points = int(data.get("n_points", 200))
     try:
-        import scipy.signal
-        import numpy as np
-        num = [float(x) for x in num]
-        den = [float(x) for x in den]
         system = scipy.signal.TransferFunction(num, den)
         t = np.linspace(0, t_final, n_points)
         t, y = scipy.signal.step(system, T=t)
@@ -567,51 +828,35 @@ def simular_saida():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@app.route('/discreto')
-def pagina_discreto():
-    return render_template('discreto.html')
 
+# Discretização
 @app.route('/atualizar_discreto', methods=['POST'])
 def atualizar_discreto():
     data = request.get_json()
-    # Recebe os parâmetros da planta
     ordem = int(data.get("ordem", 2))
     polos = [float(data.get(f"polo_{i+1}", -1)) for i in range(ordem)]
     zeros = [float(data.get(f"zero_{i+1}", 0)) for i in range(ordem)]
     Ts = float(data.get("Ts", 0.1))
 
-    # Função de transferência contínua
     num = np.poly([z for z in zeros if abs(z) > 1e-8]) if any(abs(z) > 1e-8 for z in zeros) else np.array([1.0])
     den = np.poly([p for p in polos if abs(p) > 1e-8]) if any(abs(p) > 1e-8 for p in polos) else np.array([1.0])
     Gs = ctl.tf(num, den)
 
-    # Discretização (bilinear)
     Gz = ctl.sample_system(Gs, Ts, method='tustin')
 
-    # Resposta ao degrau contínua
     T_cont, y_cont = ctl.step_response(Gs, T=np.linspace(0, Ts*50, 500))
-    # Resposta ao degrau discreta
     T_disc = np.arange(0, Ts*50, Ts)
     tout, y_disc = ctl.step_response(Gz, T=T_disc)
 
-    # LaTeX das FTs
     latex_Gs = f"\\[ G(s) = \\frac{{{latex_poly(num, 's')}}}{{{latex_poly(den, 's')}}} \\]"
     return jsonify({
         "latex_Gs": latex_Gs,
-        "plot_continuo": {
-            "x": T_cont.tolist(),
-            "y": y_cont.tolist()
-        },
-        "plot_discreto": {
-            "x": tout.tolist(),
-            "y": y_disc.tolist()
-        }
+        "plot_continuo": {"x": T_cont.tolist(), "y": y_cont.tolist()},
+        "plot_discreto": {"x": tout.tolist(), "y": y_disc.tolist()}
     })
 
-@app.route('/pid')
-def pid_page():
-    return render_template('pid.html')
 
+# PID
 @app.route('/pid_latex', methods=['POST'])
 def pid_latex():
     data = request.get_json()
@@ -621,7 +866,6 @@ def pid_latex():
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
     num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
     den_planta = np.poly(polos_planta)
-
     latex_plant = f"\\[ G(s) = \\frac{{{latex_poly(num_planta, 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
 
     ctrl_type = data.get('ctrl_type', 'PID')
@@ -629,9 +873,7 @@ def pid_latex():
     Ti = float(data.get('ctrl_ti', 1))
     Td = float(data.get('ctrl_td', 1))
     N = float(data.get('ctrl_n', 10))
-    b = float(data.get('ctrl_b', 0.5))
 
-    # Mostra os parâmetros reais na expressão LaTeX
     if ctrl_type == "P":
         latex_ctrl = r"\[ G_c(s) = %.2f \]" % K
     elif ctrl_type == "I":
@@ -640,13 +882,10 @@ def pid_latex():
         latex_ctrl = r"\[ G_c(s) = %.2f \left(1 + \frac{1}{%.2f\,s}\right) \]" % (K, Ti)
     elif ctrl_type == "PD":
         latex_ctrl = r"\[ G_c(s) = %.2f \left(1 + %.2f\,s \frac{%.2f}{s+%.2f}\right) \]" % (K, Td, N, N)
-    else:  # PID
+    else:
         latex_ctrl = r"\[ G_c(s) = %.2f \left(1 + \frac{1}{%.2f\,s} + \frac{%.2f\,s\,%.2f}{s+%.2f}\right) \]" % (K, Ti, Td, N, N)
 
-    return jsonify({
-        "latex_plant": latex_plant,
-        "latex_ctrl": latex_ctrl
-    })
+    return jsonify({"latex_plant": latex_plant, "latex_ctrl": latex_ctrl})
 
 @app.route('/pid_simular', methods=['POST'])
 def pid_simular():
@@ -664,9 +903,7 @@ def pid_simular():
     Ti = float(data.get('ctrl_ti', 1))
     Td = float(data.get('ctrl_td', 1))
     N = float(data.get('ctrl_n', 10))
-    b = float(data.get('ctrl_b', 0.5))
 
-    s = ctl.tf([1, 0], [0, 1])
     if ctrl_type == "P":
         Gc = ctl.tf([K], [1])
     elif ctrl_type == "I":
@@ -677,7 +914,7 @@ def pid_simular():
         numc = [K*Td*N, K]
         denc = [1, N]
         Gc = ctl.tf(numc, denc)
-    else:  # PID
+    else:
         numc = [K*Td*N, K*N, K]
         denc = [Ti, Ti*N, 0]
         Gc = ctl.tf(numc, denc)
@@ -685,31 +922,16 @@ def pid_simular():
     sys_cl = ctl.feedback(Gc*G, 1)
     T = np.linspace(0, 40, 400)
     T, y = ctl.step_response(sys_cl, T)
-    # Corrigido: forced_response retorna apenas 2 valores nas versões recentes
-    _, u = ctl.forced_response(Gc, T, 1 - y)
+    _, u = safe_forced_response(Gc, T, 1 - y)
 
-    plot_processo = {
-        "data": [
-            {"x": T.tolist(), "y": y.tolist(), "type": "scatter", "name": "Saída do Processo"}
-        ],
-        "layout": {"title": "Saída do Processo", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "y(t)"}}
-    }
-    plot_controlador = {
-        "data": [
-            {"x": T.tolist(), "y": u.tolist(), "type": "scatter", "name": "Saída do Controlador"}
-        ],
-        "layout": {"title": "Saída do Controlador", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "u(t)"}}
-    }
+    plot_processo = {"data": [{"x": T.tolist(), "y": y.tolist(), "type": "scatter", "name": "Saída do Processo"}],
+                     "layout": {"title": "Saída do Processo", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "y(t)"}}}
+    plot_controlador = {"data": [{"x": T.tolist(), "y": u.tolist(), "type": "scatter", "name": "Saída do Controlador"}],
+                        "layout": {"title": "Saída do Controlador", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "u(t)"}}}
+    return jsonify({"plot_processo": plot_processo, "plot_controlador": plot_controlador})
 
-    return jsonify({
-        "plot_processo": plot_processo,
-        "plot_controlador": plot_controlador
-    })
 
-@app.route('/state')
-def state_page():
-    return render_template('state.html')
-
+# Estados (matrizes M, C, K)
 @app.route('/state_equation', methods=['POST'])
 def state_equation():
     data = request.get_json()
@@ -760,247 +982,381 @@ def state_equation():
         eq_latex = f"Erro ao montar sistema: {e}"
         A_latex = ""
 
-    return {
-        "equation": eq_latex,
-        "A_latex": A_latex
-    }
+    return {"equation": eq_latex, "A_latex": A_latex}
 
+def latex_frac_factored_from_coeffs(num, den, var='s'):
+    num = np.array(num, dtype=float).flatten()
+    den = np.array(den, dtype=float).flatten()
+    num = np.trim_zeros(num, 'f')
+    den = np.trim_zeros(den, 'f')
+    if den.size == 0:
+        return "\\text{indef}"
+    zeros = np.roots(num) if num.size else np.array([])
+    poles = np.roots(den) if den.size else np.array([])
+    # Filtra parte imaginária pequena
+    def sanitize(roots, tol=1e-2):
+        roots = np.array(roots, dtype=complex).flatten()
+        out = []
+        for z in roots:
+            re = float(np.real(z))
+            im = float(np.imag(z))
+            if abs(im) < tol:
+                im = 0.0
+            out.append(complex(re, im))
+        return np.array(out, dtype=complex)
+    zeros = sanitize(zeros)
+    poles = sanitize(poles)
+    K = (num[0] / den[0]) if abs(den[0]) > 1e-14 else 1.0
+    K_str = "" if np.isclose(K, 1.0, atol=1e-12) else f"{K:.3g} \\cdot "
+    return K_str + f"\\frac{{{latex_factored(zeros, var)}}}{{{latex_factored(poles, var)}}}"
+# Alocação de polos — inclui Filtro
 @app.route('/alocacao_polos_backend', methods=['POST'])
 def alocacao_polos_backend():
-    import numpy as np
-    import control as ctl
-
     data = request.get_json()
-    polos_planta = [float(p) for p in data.get("polos_planta", [-0.0758])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [])]
+
+    # Agora aceita listas [re, im] (par conjugado montado no frontend) e valores reais
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-0.0758]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", []))
     ganho_planta = float(data.get("ganho_planta", 1.0))
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [])]
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", []))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", []))
     ganho_controlador = float(data.get("ganho_controlador", 1.0))
     ts_multiplier = float(data.get("ts_multiplier", 0.5))
 
-    # Função de transferência da planta
+    filtro_ativo = bool(data.get("filtro_ativo", False))
+    polos_filtro = [float(p) for p in data.get("polos_filtro", [])]
+    ganho_filtro = float(data.get("ganho_filtro", 1.0))
+
+    desired_order = int(data.get("desired_order", 2))
+    desired_poles_type = data.get("desired_poles_type", "2nd_equal")
+
     num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
     den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-    G_planta = ctl.tf(num_planta, den_planta)
-
-    # Função de transferência do controlador
     num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
     den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+
+    G_planta = ctl.tf(num_planta, den_planta)
     G_controlador = ctl.tf(num_controlador, den_controlador)
+    L = G_controlador * G_planta
+    G_closed = ctl.feedback(L)
 
-    # Malha aberta e fechada
-    G_open = G_planta * G_controlador
-    G_closed = ctl.feedback(G_open)
+    Dp, Dc = den_planta, den_controlador
+    Np, Nc = num_planta, num_controlador
+    poly_char_coeffs = np.polyadd(np.polymul(Dp, Dc), np.polymul(Np, Nc))
 
-    # Resposta ao degrau (Malha Aberta)
-    T_open = np.linspace(0, 50, 1000)
-    _, yout_open = ctl.step_response(G_open, T_open)
-    y_final_open = yout_open[-1]
-    tol_open = 0.05 * abs(y_final_open)
-    idx_settle_open = np.where(np.abs(yout_open - y_final_open) > tol_open)[0]
-    ts_aberta = T_open[idx_settle_open[-1] + 1] if len(idx_settle_open) > 0 else T_open[-1]
+    T = np.linspace(0, 50, 1000)
+    _, yout_open_planta = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
+    _, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
 
-    # Resposta ao degrau (Malha Fechada)
-    T_closed = np.linspace(0, 50, 1000)
-    _, yout_closed = ctl.step_response(G_closed, T_closed)
-    y_final_closed = yout_closed[-1]
-    tol_closed = 0.05 * abs(y_final_closed)
-    idx_settle_closed = np.where(np.abs(yout_closed - y_final_closed) > tol_closed)[0]
-    ts_fechada = T_closed[idx_settle_closed[-1] + 1] if len(idx_settle_closed) > 0 else T_closed[-1]
+    S = ctl.feedback(ctl.tf([1.0], [1.0]), L)
+    Tq = ctl.feedback(G_planta, G_controlador)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
 
-    # Tempo de assentamento desejado (multiplicador)
-    ts_desejado = ts_aberta * ts_multiplier
+    def ts5_open_from_poles(poles):
+        poles = np.array(poles, dtype=complex)
+        if poles.size == 0 or np.any(np.real(poles) >= -1e-12):
+            return None
+        slow_re = float(np.max(np.real(poles)))
+        alpha = -slow_re
+        tol_re = max(1e-3, 1e-2*alpha)
+        group = np.array([p for p in poles if abs(np.real(p) - slow_re) <= tol_re], dtype=complex)
+        complex_dom = [p for p in group if abs(np.imag(p)) > 1e-8]
+        if len(complex_dom) >= 1:
+            p = complex_dom[0]; wn = abs(p)
+            if wn <= 0: return None
+            zeta = -np.real(p)/wn
+            if zeta <= 0: return None
+            return 3.0/(zeta*wn)
+        m = len(group)
+        coeff = 6.3 if m >= 3 else (4.8 if m == 2 else 3.0)
+        return coeff/alpha
 
-    # Pd (polo dominante desejado) - regras típicas
-    ordem = len(polos_planta)
-    if ordem == 1:
-        pd_val = 3 / ts_desejado if ts_desejado > 0 else 0
-        pd_formula = r"P_d = \frac{3}{T_{s,fechada}}"
-    elif ordem == 2:
-        pd_val = 4.8 / ts_desejado if ts_desejado > 0 else 0
-        pd_formula = r"P_d = \frac{4.8}{T_{s,fechada}}"
-    elif ordem == 3:
-        pd_val = 6.3 / ts_desejado if ts_desejado > 0 else 0
-        pd_formula = r"P_d = \frac{6.3}{T_{s,fechada}}"
-    else:
-        pd_val = 3 / ts_desejado if ts_desejado > 0 else 0
-        pd_formula = r"P_d = \frac{3}{T_{s,fechada}}"
-    pd_value = f"{pd_val:.4g}" if ts_desejado > 0 else ""
+    def settling_time_5(t, y, pct=0.05):
+        if len(t) == 0 or len(y) == 0: return 0.0
+        y_final = float(y[-1])
+        tol = pct * (abs(y_final) if abs(y_final) > 1e-8 else max(1.0, float(np.max(np.abs(y)))))
+        idx = np.where(np.abs(y - y_final) > tol)[0]
+        return float(t[idx[-1] + 1]) if len(idx) > 0 and (idx[-1] + 1) < len(t) else float(t[-1])
 
-    # Polinômio característico atual
-    poly_caracteristico = None
+    polos_pl = ctl.poles(G_planta)
+    ts_aberta_formula = ts5_open_from_poles(polos_pl)
+    ts_aberta = float(ts_aberta_formula) if ts_aberta_formula is not None else settling_time_5(T, yout_open_planta)
+    ts_fechada = settling_time_5(T, yout_closed)
+
     try:
-        Dp = den_planta
-        Dc = den_controlador
-        Np = num_planta
-        Nc = num_controlador
-        poly_atual = np.polyadd(np.polymul(Dp, Dc), np.polymul(Np, Nc))
-        poly_caracteristico = f"\\( {latex_poly(poly_atual, 's')} \\)"
+        poly_caracteristico = f"\\( {latex_poly(poly_char_coeffs, 's')} \\)"
     except Exception:
         poly_caracteristico = ""
 
-    # Polinômio desejado (todos polos em -Pd)
-    if ordem > 0 and pd_val > 0:
-        poly_desejado_coeffs = np.poly([-pd_val] * ordem)
-        poly_desejado = f"\\( {latex_poly(poly_desejado_coeffs, 's')} \\)"
-    else:
-        poly_desejado = ""
+    ts_desejado = float(ts_aberta) * float(ts_multiplier)
+    poly_desejado = ""
+    pd_value_latex = ""
+    if ts_desejado > 1e-12 and np.isfinite(ts_desejado):
+        if desired_order == 1:
+            Pd = 3.0 / ts_desejado
+            coeffs = np.poly([-Pd])
+            poly_desejado = f"\\( {latex_poly(coeffs, 's')} \\)"
+            pd_value_latex = f"\\( P_d = {Pd:.4g} \\)"
+        elif desired_order == 2:
+            if desired_poles_type == "2nd_distinct":
+                c = 1.5
+                a = (3.0 + 1.5/c) / ts_desejado
+                b = c * a
+                coeffs = np.array([1.0, a + b, a * b])
+                poly_desejado = f"\\( {latex_poly(coeffs, 's')} \\)"
+                pd_value_latex = f"\\( p_{{lento}} = {a:.3g},\\ p_{{ráp}} = {b:.3g}\\;\\)"
+            else:
+                Pd = 4.8 / ts_desejado
+                coeffs = np.array([1.0, 2.0*Pd, Pd**2])
+                poly_desejado = f"\\( {latex_poly(coeffs, 's')} \\)"
+                pd_value_latex = f"\\( P_d = {Pd:.4g} \\)"
+        else:
+            Pd = 6.3 / ts_desejado
+            coeffs = np.poly([-Pd, -Pd, -Pd])
+            poly_desejado = f"\\( {latex_poly(coeffs, 's')} \\)"
+            pd_value_latex = f"\\( P_d = {Pd:.4g} \\)"
 
-    # Diagrama de Polos e Zeros (Malha Fechada)
+    # Filtro F(s) aplicado à saída em malha fechada
+    if filtro_ativo and polos_filtro:
+        num_filtro = [ganho_filtro]
+        den_filtro = np.poly(polos_filtro)
+        F = ctl.tf(num_filtro, den_filtro)
+    else:
+        F = ctl.tf([1.0], [1.0])
+
+    Y_filt = F * G_closed
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
+
+    plot_closed_filt = {
+        "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado", "line": { "width": 3}}],
+        "layout": {"title": "Resposta ao Degrau (Malha Fechada + Filtro)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
+    }
+    plot_closed = {
+        "data": [{"x": T.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Y/R = L/(1+L)", "line": { "width": 3}}],
+        "layout": {"title": "Resposta ao Degrau (Malha Fechada)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
+    }
+    plot_open = {
+        "data": [{"x": T.tolist(), "y": yout_open_planta.tolist(), "mode": "lines", "name": "Planta (Malha Aberta)", "line": { "width": 3}}],
+        "layout": {"title": "Resposta ao Degrau (Malha Aberta - Planta)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
+    }
+    plot_er = {
+        "data": [{"x": T.tolist(), "y": e_step.tolist(), "mode": "lines", "name": "E/R = 1/(1+CG)", "line": { "width": 3}}],
+        "layout": {"title": "Erro frente a degrau (E/R = 1/(1+CG))", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "e(t)"}}
+    }
+    plot_yq = {
+        "data": [{"x": T.tolist(), "y": yq_step.tolist(), "mode": "lines", "name": "Y/Q = G/(1+CG)"}],
+        "layout": {"title": "Saída frente a degrau de perturbação (Y/Q = G/(1+CG))", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "y(t)"}}
+    }
+
     try:
-        num_closed = np.array(G_closed.num).flatten()
-        den_closed = np.array(G_closed.den).flatten()
-        zeros_closed = np.roots(num_closed)
-        poles_closed = np.roots(den_closed)
+        if filtro_ativo and polos_filtro:
+            num_filt = np.polymul(np.array(F.num).flatten(), np.array(G_closed.num).flatten())
+            den_filt = np.polymul(np.array(F.den).flatten(), np.array(G_closed.den).flatten())
+            zeros_closed = np.roots(num_filt) if num_filt.size else np.array([])
+            poles_closed = np.roots(den_filt) if den_filt.size else np.array([])
+        else:
+            num_closed = np.array(G_closed.num).flatten()
+            den_closed = np.array(G_closed.den).flatten()
+            zeros_closed = np.roots(num_closed) if num_closed.size else np.array([])
+            poles_closed = np.roots(den_closed) if den_closed.size else np.array([])
     except Exception:
-        zeros_closed = []
-        poles_closed = []
+        zeros_closed, poles_closed = np.array([]), np.array([])
 
     plot_pz_closed = {
         "data": [
             {"x": np.real(zeros_closed).tolist(), "y": np.imag(zeros_closed).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
             {"x": np.real(poles_closed).tolist(), "y": np.imag(poles_closed).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
         ],
-        "layout": {
-            "title": "Diagrama de Polos e Zeros (Malha Fechada)",
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
+        "layout": {"title": "Diagrama de Polos e Zeros (Malha Fechada)", "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
     }
 
-    # Diagrama de Polos e Zeros (Malha Aberta)
     try:
-        num_open = np.array(G_open.num).flatten()
-        den_open = np.array(G_open.den).flatten()
-        zeros_open = np.roots(num_open)
-        poles_open = np.roots(den_open)
+        zeros_open = np.roots(num_planta)
+        poles_open = np.roots(den_planta)
     except Exception:
-        zeros_open = []
-        poles_open = []
+        zeros_open, poles_open = np.array([]), np.array([])
 
     plot_pz_open = {
         "data": [
             {"x": np.real(zeros_open).tolist(), "y": np.imag(zeros_open).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
             {"x": np.real(poles_open).tolist(), "y": np.imag(poles_open).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
         ],
-        "layout": {
-            "title": "Diagrama de Polos e Zeros (Malha Aberta)",
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
+        "layout": {"title": "Diagrama de Polos e Zeros (Malha Aberta - Planta)", "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
     }
 
-    # Gráfico da resposta ao degrau (Malha Fechada)
-    plot_closed = {
-        "data": [
-            {"x": T_closed.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Fechada)"}
-        ],
-        "layout": {
-            "title": "Resposta ao Degrau (Malha Fechada)",
-            "xaxis": {"title": "Tempo (s)"},
-            "yaxis": {"title": "Amplitude"}
-        }
-    }
-
-    try:
-        polos = np.roots(den_planta)
-        zeros = np.roots(num_planta)
-    except Exception:
-        polos = []
-        zeros = []
-    plot_pz_planta = {
-        "data": [
-            {"x": np.real(zeros).tolist(), "y": np.imag(zeros).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
-            {"x": np.real(polos).tolist(), "y": np.imag(polos).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
-        ],
-        "layout": {
-            "title": "Diagrama de Polos e Zeros da Planta",
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
-    }
-
-    # Diagrama de Polos e Zeros (Controlador)
-    try:
-        polos_ctrl = np.roots(den_controlador)
-        zeros_ctrl = np.roots(num_controlador)
-    except Exception:
-        polos_ctrl = []
-        zeros_ctrl = []
-    plot_pz_controlador = {
-        "data": [
-            {"x": np.real(zeros_ctrl).tolist(), "y": np.imag(zeros_ctrl).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
-            {"x": np.real(polos_ctrl).tolist(), "y": np.imag(polos_ctrl).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
-        ],
-        "layout": {
-            "title": "Diagrama de Polos e Zeros do Controlador",
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
-    }
-
-    # Gráfico da resposta ao degrau (Malha Aberta)
-    plot_open = {
-        "data": [
-            {"x": T_open.tolist(), "y": yout_open.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Aberta)"}
-        ],
-        "layout": {
-            "title": "Resposta ao Degrau (Malha Aberta)",
-            "xaxis": {"title": "Tempo (s)"},
-            "yaxis": {"title": "Amplitude"}
-        }
-    }
-
-    # LaTeX das FTs
     latex_planta = f"\\( G(s) = {ganho_planta:.3g} \\cdot \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\)"
     latex_controlador = f"\\( G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_factored(zeros_controlador, 's')}}}{{{latex_factored(polos_controlador, 's')}}} \\)"
     
+    # FT para o modal (com coeficientes numéricos)
+    # L(s) = C(s)G(s) = Nl/Dl
+    Nl = np.polymul(Nc, Np)      # numerador de L(s)
+    Dl = np.polymul(Dc, Dp)      # denominador de L(s)
+    Dcl = np.polyadd(Dl, Nl)     # denominador de (1 + L)  => polinômio característico
+
+    latex_resp_aberta = latex_planta  # já fatorada
+    latex_resp_fechada = f"\\( \\frac{{Y(s)}}{{R(s)}} = {latex_frac_factored_from_coeffs(Nl, Dcl, 's')} \\)"
+    latex_resp_erro     = f"\\( \\frac{{E(s)}}{{R(s)}} = {latex_frac_factored_from_coeffs(Dl, Dcl, 's')} \\)"
+    latex_resp_perturbacao = f"\\( \\frac{{Y(s)}}{{Q(s)}} = {latex_frac_factored_from_coeffs(np.polymul(Dc, Np), Dcl, 's')} \\)"
+
     return jsonify({
+        # ...existing fields...
         "tempo_assentamento_aberta": round(float(ts_aberta), 3),
         "tempo_assentamento_fechada": round(float(ts_fechada), 3),
         "ts_desejado": round(float(ts_desejado), 3),
-        "pd_value": pd_value,
-        "pd_formula": f"({pd_formula})",
+        "pd_value": pd_value_latex,
         "poly_caracteristico": poly_caracteristico,
         "poly_desejado": poly_desejado,
         "latex_planta": latex_planta,
         "latex_controlador": latex_controlador,
         "plot_pz_closed": plot_pz_closed,
         "plot_pz_open": plot_pz_open,
-        "plot_pz_planta": plot_pz_planta,
-        "plot_pz_controlador": plot_pz_controlador,
         "plot_closed": plot_closed,
-        "plot_open": plot_open
+        "plot_open": plot_open,
+        "plot_er": plot_er,
+        "plot_yq": plot_yq,
+        "plot_closed_filt": plot_closed_filt,
+        "latex_resp_aberta": latex_resp_aberta,
+        "latex_resp_fechada": latex_resp_fechada,
+        "latex_resp_erro": latex_resp_erro,
+        "latex_resp_perturbacao": latex_resp_perturbacao
     })
+@app.route('/lgr_backend', methods=['POST'])
+def lgr_backend():
+    data = request.get_json(force=True)
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", []))
+    ganho = float(data.get("ganho", 1.0))
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", []))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", []))
+    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    tipo = data.get("tipo", "malha_aberta")
 
+    # G(s) e Gc(s)
+    num_g = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_g = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    G = ctl.tf(num_g, den_g)
+
+    num_c = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_c = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+    C = ctl.tf(num_c, den_c)
+
+    # LGR usa a FT em malha aberta (open-loop)
+    if tipo == 'malha_aberta':
+        sys = G
+        titulo = "Lugar das Raízes — Malha Aberta (Planta)"
+    elif tipo == 'malha_fechada':
+        sys = C * G  # <-- corrigido: usar L(s) = C(s)G(s), não feedback
+        titulo = "Lugar das Raízes — Malha Fechada (Y/R)"
+    else:
+        sys = G
+        titulo = "Lugar das Raízes — Malha Aberta (Planta)"
+
+    # Cálculo do LGR a partir de sys (open-loop)
+    rlist, klist = ctl.root_locus(sys, plot=False)
+    r = np.array(rlist)
+    k = np.array(klist).flatten()
+
+    branches = []
+    if r.ndim == 2:
+        if r.shape[0] == len(k):
+            for i in range(r.shape[1]):
+                branches.append(r[:, i])
+        else:
+            for i in range(r.shape[0]):
+                branches.append(r[i, :])
+
+    traces = []
+    for i, br in enumerate(branches):
+        traces.append({
+            "x": np.real(br).tolist(),
+            "y": np.imag(br).tolist(),
+            "mode": "lines",
+            "name": f"Ramo {i+1}"
+        })
+
+    # Sobrepor polos/zeros de malha aberta (do sys selecionado)
+    num = np.array(sys.num).flatten()
+    den = np.array(sys.den).flatten()
+    z = np.roots(num) if num.size else np.array([])
+    p = np.roots(den) if den.size else np.array([])
+    traces.extend([
+        {"x": np.real(z).tolist(), "y": np.imag(z).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 10, "symbol": "circle"}},
+        {"x": np.real(p).tolist(), "y": np.imag(p).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 12, "symbol": "x"}}
+    ])
+
+    lgr_plot = {
+        "data": traces,
+        "layout": {
+            "title": titulo,
+            "xaxis": {"title": "Re", "zeroline": True},
+            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
+            "showlegend": True
+        }
+    }
+    return jsonify({"lgr_plot": lgr_plot})
+
+
+@app.route('/step_backend', methods=['POST'])
+def step_backend():
+    data = request.get_json(force=True)
+    polos_planta = parse_polos_zeros(data.get("polos_planta", [-1]))
+    zeros_planta = parse_polos_zeros(data.get("zeros_planta", []))
+    ganho = float(data.get("ganho", 1.0))
+
+    polos_controlador = parse_polos_zeros(data.get("polos_controlador", []))
+    zeros_controlador = parse_polos_zeros(data.get("zeros_controlador", []))
+    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    tipo = data.get("tipo", "malha_fechada")
+
+    num_g = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
+    den_g = np.poly(polos_planta) if polos_planta else np.array([1.0])
+    G = ctl.tf(num_g, den_g)
+
+    num_c = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
+    den_c = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
+    C = ctl.tf(num_c, den_c)
+
+    L = C * G
+    if tipo == "malha_aberta":
+        sys = G  # apenas a planta em malha aberta
+        nome = "Planta (Malha Aberta)"
+    elif tipo == "erro":
+        sys = ctl.feedback(ctl.tf([1.0], [1.0]), L)  # S = 1/(1+L)
+        nome = "E/R = 1/(1+CG)"
+    elif tipo == "perturbacao":
+        sys = ctl.feedback(G, C)  # Y/Q = G/(1+CG)
+        nome = "Y/Q = G/(1+CG)"
+    else:  # malha_fechada
+        sys = ctl.feedback(L)  # Y/R = L/(1+L)
+        nome = "Y/R = CG/(1+CG)"
+
+    T = np.linspace(0, 10, 600, dtype=float)
+    _, y = safe_forced_response(sys, T, np.ones_like(T, dtype=float))
+    step_plot = {
+        "data": [{"x": T.tolist(), "y": y.tolist(), "mode": "lines", "name": nome}],
+        "layout": {"title": "Resposta ao Degrau", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
+    }
+    return jsonify({"step_plot": step_plot})
+# Página 2 — Malha aberta
 @app.route('/atualizar_pagina2', methods=['POST'])
 def atualizar_pagina2():
     data = request.get_json()
     polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
     zeros_planta = [float(z) for z in data.get("zeros_planta", [0])]
+    ganho_planta = float(data.get("ganho_planta", 1.0))
 
     zeros_planta_filtrados = [z for z in zeros_planta if abs(z) > 1e-8]
-    num_planta = np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0])
+    num_planta = ganho_planta * (np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else np.array([1.0]))
     den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
 
     G_planta = ctl.tf(num_planta, den_planta)
 
-    latex_planta_polinomial = (
-        f"\\[ G(s) = \\frac{{{latex_poly(num_planta, 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
-    )
-    latex_planta_fatorada = (
-        f"\\[ G(s) = \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
-    )
-    latex_planta_parcial = (
-    f"\\[ G(s) = {latex_partial_fraction(num_planta, den_planta, 's')[3:-3]} \\]"
-    )
+    K_str = "" if np.isclose(ganho_planta, 1.0, atol=1e-12) else f"{ganho_planta:.3g} \\cdot "
+    latex_planta_polinomial = f"\\[ G(s) = {K_str}\\frac{{{latex_poly(np.poly(zeros_planta_filtrados) if zeros_planta_filtrados else [1.0], 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
+    latex_planta_fatorada   = f"\\[ G(s) = {K_str}\\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
+    latex_planta_parcial    = latex_partial_fraction(num_planta, den_planta, 's')
 
-    # Diagrama de Polos e Zeros
     zeros = np.roots(num_planta)
     polos = np.roots(den_planta)
     plot_pz_data = {
@@ -1008,141 +1364,26 @@ def atualizar_pagina2():
             {"x": np.real(zeros).tolist(), "y": np.imag(zeros).tolist(), "mode": "markers", "name": "Zeros", "marker": {"color": "blue", "size": 12, "symbol": "circle"}},
             {"x": np.real(polos).tolist(), "y": np.imag(polos).tolist(), "mode": "markers", "name": "Polos", "marker": {"color": "red", "size": 14, "symbol": "x"}}
         ],
-        "layout": {
-            "title": "Diagrama de Polos e Zeros",
-            "xaxis": {"title": "Re", "zeroline": True},
-            "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-            "showlegend": True
-        }
+        "layout": {"title": "Diagrama de Polos e Zeros", "xaxis": {"title": "Re", "zeroline": True}, "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1}, "showlegend": True}
     }
 
-    # Resposta ao Degrau (Malha Aberta)
-    T = np.linspace(0, 20, 500)
-    _, yout = ctl.step_response(G_planta, T)
+    T = np.linspace(0, 20, 500, dtype=float)
+    _, yout = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
     plot_open_data = {
-        "data": [
-            {"x": T.tolist(), "y": yout.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Aberta)"}
-        ],
-        "layout": {
-            "title": "Resposta ao Degrau (Malha Aberta)",
-            "xaxis": {"title": "Tempo (s)"},
-            "yaxis": {"title": "Amplitude"}
-        }
+        "data": [{"x": T.tolist(), "y": yout.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Aberta)"}],
+        "layout": {"title": "Resposta ao Degrau (Malha Aberta)", "xaxis": {"title": "Tempo (s)"}, "yaxis": {"title": "Amplitude"}}
     }
 
     return jsonify({
         "latex_planta_polinomial": latex_planta_polinomial,
-        "latex_planta_fatorada": latex_planta_fatorada,
-        "latex_planta_parcial": latex_planta_parcial,
+        "latex_planta_fatorada":   latex_planta_fatorada,
+        "latex_planta_parcial":    latex_planta_parcial,
         "plot_pz_data": plot_pz_data,
         "plot_open_data": plot_open_data
     })
 
-def latex_poly(coeffs, var='s'):
-    coeffs = np.array(coeffs, dtype=float)
-    # Remove zeros à direita (constante no início)
-    coeffs = np.trim_zeros(coeffs, 'f')
-    # Se todos os zeros são zero, o numerador vira [1, 0, 0, ...]
-    # Queremos mostrar "1" se todos os coeficientes, exceto o primeiro, são zero
-    if len(coeffs) > 1 and np.allclose(coeffs[1:], 0) and np.isclose(coeffs[0], 1):
-        return "1"
-    if len(coeffs) == 1 and np.isclose(coeffs[0], 1):
-        return "1"
-    ordem = len(coeffs) - 1
-    termos = []
-    for i, c in enumerate(coeffs):
-        pot = ordem - i
-        if abs(c) < 1e-10:
-            continue
-        c_str = f"{c:.3g}" if abs(c) != 1 or pot == 0 else ("-" if c == -1 else "")
-        if pot > 1:
-            termos.append(f"{c_str}{var}^{pot}")
-        elif pot == 1:
-            termos.append(f"{c_str}{var}")
-        else:
-            termos.append(f"{c_str}")
-    return " + ".join(termos).replace("+ -", "- ")
 
-def latex_monic(coeffs, var='s'):
-    if abs(coeffs[0]) < 1e-10:
-        return latex_poly(coeffs, var)
-    norm = coeffs / coeffs[0]
-    return latex_poly(norm, var)
-
-def latex_factored(roots, var='s'):
-    if len(roots) == 0 or np.allclose(roots, 0):
-        return "1"
-    termos = []
-    for r in roots:
-        if abs(r) < 1e-10:
-            termos.append(f"{var}")
-        else:
-            # Exibe (s - r) para qualquer valor de r (positivo ou negativo)
-            sinal = "-" if r >= 0 else "+"
-            valor = abs(r)
-            if valor < 1e-10:
-                termos.append(f"{var}")
-            else:
-                termos.append(f"({var} {sinal} {valor:.3g})")
-    return "".join(termos)
-
-def latex_partial_fraction(num, den, var='s'):
-    """
-    Gera a representação LaTeX da decomposição em frações parciais.
-    """
-    import scipy.signal
-    import numpy as np
-
-    # Remove zeros desnecessários no numerador e denominador
-    num = np.trim_zeros(num, 'f')
-    den = np.trim_zeros(den, 'f')
-
-    # Verifica se o numerador ou denominador é vazio
-    if len(num) == 0 or len(den) == 0:
-        return "\\[ 0 \\]"
-
-    try:
-        # Calcula os resíduos, polos e termos constantes
-        r, p, k = scipy.signal.residue(num, den)
-
-        # Organiza os polos e resíduos em um dicionário para tratar polos repetidos
-        termos = {}
-        for ri, pi in zip(r, p):
-            pi = np.round(pi, 4)  # Arredonda o polo
-            if pi not in termos:
-                termos[pi] = []
-            termos[pi].append(ri)  # Adiciona o resíduo ao polo correspondente
-
-        # Gera os termos da fração parcial
-        latex_termos = []
-        for pi, residuos in termos.items():
-            for i, ri in enumerate(residuos):
-                ri = np.round(ri, 4)  # Arredonda o resíduo
-                if abs(ri) > 1e-8:  # Ignora resíduos nulos
-                    expoente = i + 1
-                    sinal = "+" if pi >= 0 else "-"
-                    valor = abs(pi)
-                    if expoente == 1:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{{var} {sinal} {valor:.4g}}}")
-                    else:
-                        latex_termos.append(f"\\frac{{{ri:.4g}}}{{({var} {sinal} {valor:.4g})^{expoente}}}")
-
-        # Adiciona os termos constantes, se existirem
-        if k is not None and len(k) > 0:
-            for i, ki in enumerate(k):
-                if abs(ki) > 1e-8:  # Ignora termos constantes nulos
-                    latex_termos.append(f"{ki:.4g}{var}^{len(k)-i-1}" if i < len(k) - 1 else f"{ki:.4g}")
-
-        # Retorna a expressão LaTeX
-        return "\\[ " + " + ".join(latex_termos) + " \\]" if latex_termos else "\\[ 0 \\]"
-    except Exception as e:
-        return f"\\[ \\text{{Erro ao calcular frações parciais: {e}}} \\]"
-
-
-@app.route('/sinais')
-def sinais_page():
-    return render_template('sinais.html')
-
+# Sinais (FT genérica) + Bode opcional
 @app.route('/sinais_backend', methods=['POST'])
 def sinais_backend():
     data = request.get_json()
@@ -1155,12 +1396,10 @@ def sinais_backend():
     mod_zeros = np.abs(zeros)
     mod_polos = np.abs(polos)
 
-    T = np.linspace(0, 20, 500)
-    T, yout = ctl.step_response(G, T)
-
+    T = np.linspace(0, 20, 500, dtype=float)
+    T, yout = safe_forced_response(G, T, np.ones_like(T, dtype=float))
     latex_ft = f"\\[ G(s) = \\frac{{{latex_poly(num, 's')}}}{{{latex_poly(den, 's')}}} \\]"
 
-    # Novo: cálculo do diagrama de Bode se solicitado
     bode_data = None
     if data.get("bode", False):
         try:
@@ -1168,38 +1407,20 @@ def sinais_backend():
             mag, phase, omega = ctl.bode(G, omega=omega, dB=True, plot=False)
             bode_data = {
                 "data": [
-                    {
-                        "x": omega.tolist(),
-                        "y": 20 * np.log10(mag).tolist(),
-                        "type": "scatter",
-                        "mode": "lines",
-                        "name": "Magnitude"
-                    },
-                    {
-                        "x": omega.tolist(),
-                        "y": np.degrees(phase).tolist(),
-                        "type": "scatter",
-                        "mode": "lines",
-                        "name": "Fase",
-                        "yaxis": "y2"
-                    }
+                    {"x": omega.tolist(), "y": (20*np.log10(mag)).tolist(), "type": "scatter", "mode": "lines", "name": "Magnitude"},
+                    {"x": omega.tolist(), "y": np.degrees(phase).tolist(),   "type": "scatter", "mode": "lines", "name": "Fase", "yaxis": "y2"}
                 ],
                 "layout": {
                     "title": "Diagrama de Bode",
                     "xaxis": {"title": "Frequência (rad/s)", "type": "log"},
                     "yaxis": {"title": "Magnitude (dB)"},
-                    "yaxis2": {
-                        "title": "Fase (graus)",
-                        "overlaying": "y",
-                        "side": "right"
-                    },
+                    "yaxis2": {"title": "Fase (graus)", "overlaying": "y", "side": "right"},
                     "legend": {"x": 0, "y": 1.1, "orientation": "h"}
                 }
             }
-        except Exception as e:
+        except Exception:
             bode_data = None
 
-    # Corrigir: polos e zeros para string (JSON serializável)
     def complex_to_str(z):
         if isinstance(z, complex):
             if abs(z.imag) < 1e-8:
@@ -1218,17 +1439,12 @@ def sinais_backend():
         "mod_polos": mod_polos.tolist(),
         "zeros": zeros_json,
         "polos": polos_json,
-        "step_response": {
-            "T": T.tolist(),
-            "y": yout.tolist()
-        },
+        "step_response": {"T": T.tolist(), "y": yout.tolist()},
         "bode_data": bode_data
     })
 
-@app.route('/raizes')
-def raizes():
-    return render_template('raizes.html')
 
+# EDO -> FT e resposta
 @app.route('/sinais_edo', methods=['POST'])
 def sinais_edo():
     import sympy as sp
@@ -1237,13 +1453,11 @@ def sinais_edo():
     eq_str = data.get("edo", "")
     t = np.linspace(0, 20, 500)
     try:
-        # Parse EDO do tipo: y'' + 2y' + y = u(t)
         y = sp.Function('y')
         u = sp.Function('u')
         t_sym = sp.symbols('t')
         eq = sp.sympify(eq_str.replace("=", "-(") + ")", locals={'y': y(t_sym), "u": u(t_sym)})
         eq = sp.Eq(eq, 0)
-        # Coeficientes da EDO (ordem até 2)
         lhs = eq.lhs.expand()
         a2 = lhs.coeff(y(t_sym).diff(t_sym, 2))
         a1 = lhs.coeff(y(t_sym).diff(t_sym, 1))
@@ -1258,6 +1472,8 @@ def sinais_edo():
     except Exception as e:
         return jsonify({"t": [], "y": [], "latex": f"Erro ao interpretar EDO: {e}"})
 
+
+# Página 4 — Malha fechada com Filtro (rota separada)
 @app.route('/novo_grafico_fechado', methods=['POST'])
 def novo_grafico_fechado():
     data = request.get_json()
@@ -1268,7 +1484,6 @@ def novo_grafico_fechado():
     ganho_controlador = float(data.get("ganho_controlador", 1.0))
     ganho_planta = float(data.get("ganho_planta", 1.0))
 
-    # Funções de transferência
     num_planta = ganho_planta * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
     den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
     num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
@@ -1278,158 +1493,74 @@ def novo_grafico_fechado():
     G_controlador = ctl.tf(num_controlador, den_controlador)
     G_closed = ctl.feedback(G_planta * G_controlador)
 
-    # Resposta ao degrau (Malha Fechada - sem perturbação)
-    T = np.linspace(0, 50, 1000)
-    _, yout_closed = ctl.step_response(G_closed, T)
+    T = np.linspace(0, 50, 1000, dtype=float)
+    _, yout_closed = safe_forced_response(G_closed, T, np.ones_like(T, dtype=float))
 
-    # Dados para o novo gráfico
-    novo_grafico_data = {
+    t_perturb_fechada = float(data.get("t_perturb_fechada", 20))
+    amp_perturb_fechada = float(data.get("amp_perturb_fechada", 0.5))
+    u_ref = np.ones_like(T, dtype=float)
+    u_ref[T >= t_perturb_fechada] += amp_perturb_fechada
+    _, yout_closed_ref2 = safe_forced_response(G_closed, T, u_ref)
+
+    _, yout_open = safe_forced_response(G_planta, T, np.ones_like(T, dtype=float))
+
+    plot_closed_data = {
         "data": [
-            {"x": T.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Resposta ao Degrau (Malha Fechada)"}
+            {"x": T.tolist(), "y": yout_closed.tolist(), "mode": "lines", "name": "Sem Perturbação", "line": {"color": "#077FFF", "width": 3}},
+            {"x": T.tolist(), "y": yout_closed_ref2.tolist(), "mode": "lines", "name": "Com Perturbação", "line": {"color": "#ff9800", "dash": "dash", "width": 2}},
+            {"x": T.tolist(), "y": yout_open.tolist(), "mode": "lines", "name": "Malha Aberta", "line": {"color": "#06B900", "dash": "dash", "width": 3}}
         ],
-        "layout": {
-            "title": "Resposta ao Degrau (Malha Fechada)",
-            "xaxis": {"title": "Tempo (s)"},
-            "yaxis": {"title": "Amplitude"}
-        }
+        "layout": {"title": "Resposta ao Degrau", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
     }
 
-    return jsonify({"novo_grafico_data": novo_grafico_data})
+    L = G_planta * G_controlador
+    S = ctl.feedback(ctl.tf([1.0], [1.0]), L)
+    Tq = ctl.feedback(G_planta, G_controlador)
+    _, e_step = safe_forced_response(S, T, np.ones_like(T, dtype=float))
+    _, yq_step = safe_forced_response(Tq, T, np.ones_like(T, dtype=float))
 
+    error_closed_data = {"data": [{"x": T.tolist(), "y": e_step.tolist(), "mode": "lines", "name": "E/R", "line": {"color": "#000000", "dash": "solid", "width": 2}}]}
+    perturb_closed_data = {"data": [{"x": T.tolist(), "y": yq_step.tolist(), "mode": "lines", "name": "Y/Q", "line": {"dash": "dash", "color": "#9c27b0"}}]}
 
-@app.route('/lgr_backend', methods=['POST'])
-def lgr_backend():
-    data = request.get_json()
-    tipo = data.get("tipo", "planta")
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [])]
-    ganho = float(data.get("ganho", 1.0))
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
+    latex_planta_polinomial = f"\\[ G(s) = \\frac{{{latex_poly(num_planta, 's')}}}{{{latex_poly(den_planta, 's')}}} \\]"
+    latex_planta_fatorada   = f"\\[ G(s) = \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
+    latex_planta_parcial    = latex_partial_fraction(num_planta, den_planta, 's')
+    latex_controlador_polinomial = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_poly(np.poly(zeros_controlador) if zeros_controlador else [1.0], 's')}}}{{{latex_poly(den_controlador, 's')}}} \\]"
+    latex_controlador_fatorada   = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_factored(zeros_controlador, 's')}}}{{{latex_factored(polos_controlador, 's')}}} \\]"
+    latex_controlador_parcial    = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot {latex_partial_fraction(np.poly(zeros_controlador) if zeros_controlador else [1.0], den_controlador, 's')[3:-3]} \\]"
 
-    try:
-        # Seleciona a FT conforme o tipo
-        if tipo == "planta":
-            num = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-            den = np.poly(polos_planta) if polos_planta else np.array([1.0])
-            latex_planta = f"\\[ G(s) = {ganho:.3g} \\cdot \\frac{{{latex_factored(zeros_planta, 's')}}}{{{latex_factored(polos_planta, 's')}}} \\]"
-        elif tipo == "controlador":
-            num = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-            den = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-            latex_planta = f"\\[ G_c(s) = {ganho_controlador:.3g} \\cdot \\frac{{{latex_factored(zeros_controlador, 's')}}}{{{latex_factored(polos_controlador, 's')}}} \\]"
-        elif tipo == "malha_aberta":
-            num_planta = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-            den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-            num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-            den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-            num = np.polymul(num_planta, num_controlador)
-            den = np.polymul(den_planta, den_controlador)
-            latex_planta = f"\\[ G_{'{aberta}'}(s) = G(s) \\cdot G_c(s) \\]"
-        else:  # malha_fechada
-            num_planta = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-            den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-            num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-            den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-            G_open = ctl.tf(np.polymul(num_planta, num_controlador), np.polymul(den_planta, den_controlador))
-            G_closed = ctl.feedback(G_open)
-            num = np.array(G_closed.num).flatten()
-            den = np.array(G_closed.den).flatten()
-            latex_planta = f"\\[ G_{'{fechada}'}(s) = \\frac{{G(s) \\cdot G_c(s)}}{{1 + G(s) \\cdot G_c(s)}} \\]"
+    # Filtro (aplicado sobre a saída de malha fechada)
+    polos_filtro = [float(p) for p in data.get("polos_filtro", [])]
+    ganho_filtro = float(data.get("ganho_filtro", 1.0))
+    filtro_ativo = bool(data.get("filtro_ativo", False))
 
-        # Lugar das Raízes (LGR)
-        try:
-            G = ctl.tf(num, den)
-            rlist, klist = ctl.root_locus(G, plot=False)
-            lgr_data = []
-            for i in range(rlist.shape[1]):
-                lgr_data.append({
-                    "x": np.real(rlist[:, i]).tolist(),
-                    "y": np.imag(rlist[:, i]).tolist(),
-                    "mode": "lines",
-                    "name": f"Comportamento {i+1}",
-                    "line": {"color": "#0074d9"},
-                    "marker": {"size": 4}
-                })
-            polos = np.roots(den)
-            zeros = np.roots(num)
-            lgr_data.append({
-                "x": np.real(polos).tolist(),
-                "y": np.imag(polos).tolist(),
-                "mode": "markers",
-                "name": "Polos",
-                "marker": {"color": "red", "size": 12, "symbol": "x"}
-            })
-            lgr_data.append({
-                "x": np.real(zeros).tolist(),
-                "y": np.imag(zeros).tolist(),
-                "mode": "markers",
-                "name": "Zeros",
-                "marker": {"color": "blue", "size": 10, "symbol": "circle"}
-            })
-            lgr_layout = {
-                "title": "Lugar das Raízes",
-                "xaxis": {"title": "Re", "zeroline": True},
-                "yaxis": {"title": "Im", "zeroline": True, "scaleanchor": "x", "scaleratio": 1},
-                "showlegend": True
-            }
-            lgr_plot = {"data": lgr_data, "layout": lgr_layout}
-            klist_out = klist.tolist()
-        except Exception as e:
-            print("Erro no root_locus:", e)
-            lgr_plot = {"data": [], "layout": {"title": f"Erro ao calcular LGR: {e}"}}
-            klist_out = []
-
-        return jsonify({
-            "latex_planta": latex_planta,
-            "lgr_plot": lgr_plot,
-            "klist": klist_out
-        })
-    except Exception as e:
-        print("Erro geral no lgr_backend:", e)
-        return jsonify({"lgr_plot": {"data": [], "layout": {"title": f"Erro geral: {e}"}}})
-
-@app.route('/step_backend', methods=['POST'])
-def step_backend():
-    data = request.get_json()
-    tipo = data.get("tipo", "malha_fechada")
-    polos_planta = [float(p) for p in data.get("polos_planta", [-1])]
-    zeros_planta = [float(z) for z in data.get("zeros_planta", [])]
-    ganho = float(data.get("ganho", 1.0))
-    polos_controlador = [float(p) for p in data.get("polos_controlador", [])]
-    zeros_controlador = [float(z) for z in data.get("zeros_controlador", [])]
-    ganho_controlador = float(data.get("ganho_controlador", 1.0))
-
-    # Funções de transferência
-    num_planta = ganho * (np.poly(zeros_planta) if zeros_planta else np.array([1.0]))
-    den_planta = np.poly(polos_planta) if polos_planta else np.array([1.0])
-    num_controlador = ganho_controlador * (np.poly(zeros_controlador) if zeros_controlador else np.array([1.0]))
-    den_controlador = np.poly(polos_controlador) if polos_controlador else np.array([1.0])
-
-    T = np.linspace(0, 50, 1000)
-    if tipo == "malha_aberta":
-        G_open = ctl.tf(num_planta, den_planta)
-        _, yout = ctl.step_response(G_open, T)
-        title = "Resposta ao Degrau (Malha Aberta)"
+    if filtro_ativo and polos_filtro:
+        num_filtro = [ganho_filtro]
+        den_filtro = np.poly(polos_filtro)
+        F = ctl.tf(num_filtro, den_filtro)
     else:
-        G_planta = ctl.tf(num_planta, den_planta)
-        G_controlador = ctl.tf(num_controlador, den_controlador)
-        G_closed = ctl.feedback(G_planta * G_controlador)
-        _, yout = ctl.step_response(G_closed, T)
-        title = "Resposta ao Degrau (Malha Fechada)"
+        F = ctl.tf([1.0], [1.0])
 
-    step_plot = {
-        "data": [
-            {"x": T.tolist(), "y": yout.tolist(), "mode": "lines", "name": title}
-        ],
-        "layout": {
-            "title": title,
-            "xaxis": {"title": "Tempo (s)"},
-            "yaxis": {"title": "Amplitude"}
-        }
+    Y_filt = F * G_closed
+    _, yout_filt = safe_forced_response(Y_filt, T, np.ones_like(T, dtype=float))
+    plot_closed_filt = {
+        "data": [{"x": T.tolist(), "y": yout_filt.tolist(), "mode": "lines", "name": "Y/R filtrado"}],
+        "layout": {"title": "Resposta ao Degrau (Malha Fechada + Filtro)", "xaxis": {"title": "Tempo (s)", "range": [0, 10]}, "yaxis": {"title": "Amplitude"}}
     }
-    return jsonify({"step_plot": step_plot})
+
+    return jsonify({
+        "latex_planta": latex_planta_polinomial,
+        "latex_planta_fatorada": latex_planta_fatorada,
+        "latex_planta_parcial": latex_planta_parcial,
+        "latex_controlador_polinomial": latex_controlador_polinomial,
+        "latex_controlador_fatorada": latex_controlador_fatorada,
+        "latex_controlador_parcial": latex_controlador_parcial,
+        "plot_closed_data": plot_closed_data,
+        "error_closed_data": error_closed_data,
+        "perturb_closed_data": perturb_closed_data,
+        "plot_closed_filt": plot_closed_filt
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True)
-    #host='0.0.0.0'
